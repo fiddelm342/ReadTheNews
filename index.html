@@ -79,7 +79,6 @@
     </footer>
 
     <script>
-        // Restructured library processing without template backticks to bypass string corruption 
         const FULL_LIBRARY = [
             {
                 category: "General & National News",
@@ -128,8 +127,8 @@
                 shows: [
                     { id: "espn_flash", name: "ESPN SportsCenter Flash", url: "https://megaphone.fm" },
                     { id: "cbs_sports", name: "CBS Sports Minute", url: "https://megaphone.fm" },
-
-{ id: "nbc_pft", name: "NBC Sports Pro Football Talk", url: "megaphone.fm" },
+                    { id: "nbc_pft", name: "NBC Sports Pro Football Talk", url: "https://megaphone.fm" },
+Use code with caution.
 { id: "thr_news", name: "The Hollywood Reporter News", url: "megaphone.fm" },
 { id: "billboard", name: "Billboard News", url: "megaphone.fm" }
 ]
@@ -227,16 +226,38 @@ activeQueueOrder = activeQueueOrder.filter(function(item) { return item !== id; 
 localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
 refreshPlaylistQueue();
 }
+// Multi-proxy smart wrapper: Uses corsproxy.io primarily, with allorigins.win backup
+async function fetchXMLWithFallback(targetUrl) {
+// Attempt 1: CorsProxy.io (Fast and raw text translation)
+try {
+const url = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
+const response = await fetch(url);
+if (response.ok) {
+return await response.text();
+}
+} catch (e) {
+console.warn('Primary CorsProxy engine blocked, trying secondary pipeline...', e);
+}
+// Attempt 2: AllOrigins Backup JSON translation unpacker
+try {
+const url = 'https://api.allorigins.win/get?url=' + encodeURIComponent(targetUrl) + '&_cb=' + Date.now();
+const response = await fetch(url);
+if (response.ok) {
+const data = await response.json();
+return data.contents;
+}
+} catch (e) {
+console.error('All backup tracking proxy pipelines have failed.', e);
+}
+throw new Error('CORS network failure');
+}
 async function fetchFeedItem(showId) {
 const show = SHOW_LOOKUP[showId];
 if (!show) return null;
 try {
-const proxyUrl = 'allorigins.win' + encodeURIComponent(show.url);
-const response = await fetch(proxyUrl);
-if (!response.ok) throw new Error();
-const data = await response.json();
+const text = await fetchXMLWithFallback(show.url);
 const parser = new DOMParser();
-const xmlDoc = parser.parseFromString(data.contents, 'text/xml');
+const xmlDoc = parser.parseFromString(text, 'text/xml');
 const firstItem = xmlDoc.querySelector('item');
 if (firstItem) {
 const title = (firstItem.querySelector('title')) ? firstItem.querySelector('title').textContent : show.name;
@@ -252,7 +273,7 @@ return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl: audio
 } catch (e) {
 console.error('Error parsing track channel ' + show.name, e);
 }
-return { id: showId, sourceName: show.name, episodeTitle: 'Feed temporarily unavailable', audioUrl: null, time: '' };
+return { id: showId, sourceName: show.name, episodeTitle: 'Feed temporarily offline', audioUrl: null, time: '' };
 }
 async function refreshPlaylistQueue(options) {
 if (!options) options = { fetchNewData: true };
@@ -364,6 +385,3 @@ btnNext.style.opacity = btnNext.disabled ? '0.3' : '1';
 }
 audioPlayer.addEventListener('ended', advanceQueueNext);
 initApp();
-
-
-
