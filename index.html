@@ -79,7 +79,7 @@
     </footer>
 
     <script>
-        // Full catalog reinstated
+        // Cleaned, validated master catalog arrays
         const FULL_LIBRARY = [
             {
                 category: "General & National News",
@@ -128,7 +128,7 @@
                 shows: [
                     { id: "espn_flash", name: "ESPN SportsCenter Flash", url: "https://megaphone.fm" },
                     { id: "cbs_sports", name: "CBS Sports Minute", url: "https://megaphone.fm" },
-                    { id: "nbc_pft", name: "NBC Sports Pro Football Talk", url: "https://megaphone.fm" },
+{ id: "nbc_pft", name: "NBC Sports Pro Football Talk", url: "megaphone.fm" },
 { id: "thr_news", name: "The Hollywood Reporter News", url: "megaphone.fm" },
 { id: "billboard", name: "Billboard News", url: "megaphone.fm" }
 ]
@@ -153,7 +153,6 @@ const btnRw10 = document.getElementById('btn-rw10');
 const btnFf10 = document.getElementById('btn-ff10');
 let activeQueueOrder = JSON.parse(localStorage.getItem('newsQueueOrder')) || ['npr_now', 'cnn_5', 'wsj_whats'];
 let autoplayEnabled = JSON.parse(localStorage.getItem('newsAutoplay')) || false;
-// Cache memory dictionary to store parsed tracks so we don't refetch on re-orders
 let tracksCacheMap = {};
 let currentTrackIndex = -1;
 function updateNavigationButtons() {
@@ -200,7 +199,6 @@ throw new Error('Proxy block error');
 async function fetchSingleFeedData(showId) {
 const show = SHOW_LOOKUP[showId];
 if (!show) return null;
-// If already loaded and caching, reuse instantly
 if (tracksCacheMap[showId] && tracksCacheMap[showId].episodeTitle !== 'Loading...') {
 return tracksCacheMap[showId];
 }
@@ -226,7 +224,6 @@ return trackObj;
 } catch (e) {
 console.error('Error parsing feed: ' + show.name, e);
 }
-// High Utility static stream routing fallback if fetching stutters
 const fallbackObj = { id: showId, sourceName: show.name, episodeTitle: 'Latest Live Audio Brief', audioUrl: show.url, time: 'Live' };
 tracksCacheMap[showId] = fallbackObj;
 return fallbackObj;
@@ -304,13 +301,11 @@ updateNavigationButtons();
 }
 async function processActiveQueueLazyLoad(forceRefresh) {
 if (forceRefresh) tracksCacheMap = {};
-// Build temporary quick structural placeholder models instantly
 renderPlaylistQueueUI();
-// Lazy parse only what is active in the queue array bounds
 for (let i = 0; i < activeQueueOrder.length; i++) {
 const showId = activeQueueOrder[i];
 await fetchSingleFeedData(showId);
-renderPlaylistQueueUI(); // Refresh item text on screen instantly upon resolution
+renderPlaylistQueueUI();
 }
 if (forceRefresh && autoplayEnabled && activeQueueOrder.length > 0) {
 autoplayEnabled = false;
@@ -323,7 +318,6 @@ if (e.target.checked) {
 if (!activeQueueOrder.includes(id)) {
 activeQueueOrder.push(id);
 localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
-// Parse just this single new track on-demand
 fetchSingleFeedData(id).then(function() { renderPlaylistQueueUI(); });
 }
 } else {
@@ -388,11 +382,9 @@ btnRw10.addEventListener('click', function() { audioPlayer.currentTime = Math.ma
 btnFf10.addEventListener('click', function() { audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + 10); });
 btnPrev.addEventListener('click', advanceQueuePrev);
 btnNext.addEventListener('click', advanceQueueNext);
-// Manual sync button refreshes only the selected subset array bounds
 btnRefresh.addEventListener('click', function() { processActiveQueueLazyLoad(true); });
 buildLibrarySelector();
 initSortableEngine();
-// Begin the lazy extraction loop
 processActiveQueueLazyLoad(autoplayEnabled);
 }
 audioPlayer.addEventListener('ended', advanceQueueNext);
