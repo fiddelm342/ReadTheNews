@@ -155,23 +155,6 @@ let activeQueueOrder = JSON.parse(localStorage.getItem('newsQueueOrder')) || ['n
 let autoplayEnabled = JSON.parse(localStorage.getItem('newsAutoplay')) || false;
 let loadedTracksData = [];
 let currentTrackIndex = -1;
-function initApp() {
-activeQueueOrder = activeQueueOrder.filter(function(id) { return SHOW_LOOKUP[id]; });
-localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
-autoplayToggle.checked = autoplayEnabled;
-autoplayToggle.addEventListener('change', function(e) {
-autoplayEnabled = e.target.checked;
-localStorage.setItem('newsAutoplay', JSON.stringify(autoplayEnabled));
-});
-btnRw10.addEventListener('click', function() { audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10); });
-btnFf10.addEventListener('click', function() { audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + 10); });
-btnPrev.addEventListener('click', advanceQueuePrev);
-btnNext.addEventListener('click', advanceQueueNext);
-btnRefresh.addEventListener('click', function() { refreshPlaylistQueue({ fetchNewData: true }); });
-buildLibrarySelector();
-initSortableEngine();
-refreshPlaylistQueue();
-}
 function buildLibrarySelector() {
 libraryContainer.innerHTML = '';
 FULL_LIBRARY.forEach(function(cat) {
@@ -226,30 +209,25 @@ activeQueueOrder = activeQueueOrder.filter(function(item) { return item !== id; 
 localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
 refreshPlaylistQueue();
 }
-// Multi-proxy smart wrapper: Uses corsproxy.io primarily, with allorigins.win backup
 async function fetchXMLWithFallback(targetUrl) {
-// Attempt 1: CorsProxy.io (Fast and raw text translation)
 try {
 const url = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
 const response = await fetch(url);
-if (response.ok) {
-return await response.text();
-}
+if (response.ok) return await response.text();
 } catch (e) {
-console.warn('Primary CorsProxy engine blocked, trying secondary pipeline...', e);
+console.warn('Primary CORS proxy offline, falling back...', e);
 }
-// Attempt 2: AllOrigins Backup JSON translation unpacker
 try {
-const url = 'https://api.allorigins.win/get?url=' + encodeURIComponent(targetUrl) + '&_cb=' + Date.now();
+const url = 'allorigins.win' + encodeURIComponent(targetUrl) + '&_cb=' + Date.now();
 const response = await fetch(url);
 if (response.ok) {
 const data = await response.json();
 return data.contents;
 }
 } catch (e) {
-console.error('All backup tracking proxy pipelines have failed.', e);
+console.error('All routing endpoints blocked.', e);
 }
-throw new Error('CORS network failure');
+throw new Error('Network proxy error');
 }
 async function fetchFeedItem(showId) {
 const show = SHOW_LOOKUP[showId];
@@ -260,7 +238,8 @@ const parser = new DOMParser();
 const xmlDoc = parser.parseFromString(text, 'text/xml');
 const firstItem = xmlDoc.querySelector('item');
 if (firstItem) {
-const title = (firstItem.querySelector('title')) ? firstItem.querySelector('title').textContent : show.name;
+const titleNode = firstItem.querySelector('title');
+const title = titleNode ? titleNode.textContent : show.name;
 const enclosure = firstItem.querySelector('enclosure');
 const audioUrl = enclosure ? enclosure.getAttribute('url') : null;
 const pubDateNode = firstItem.querySelector('pubDate');
@@ -271,9 +250,46 @@ return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl: audio
 }
 }
 } catch (e) {
-console.error('Error parsing track channel ' + show.name, e);
+console.error('Error parsing feed: ' + show.name, e);
 }
-return { id: showId, sourceName: show.name, episodeTitle: 'Feed temporarily offline', audioUrl: null, time: '' };
+return { id: showId, sourceName: show.name, episodeTitle: 'Feed temporarily unavailable', audioUrl: null, time: '' };
+}
+function updateNavigationButtons() {
+btnPrev.disabled = currentTrackIndex <= 0;
+btnNext.disabled = currentTrackIndex === -1 || currentTrackIndex >= loadedTracksData.length - 1;
+btnPrev.style.opacity = btnPrev.disabled ? '0.3' : '1';
+btnNext.style.opacity = btnNext.disabled ? '0.3' : '1';
+}
+function playIndex(index) {
+if (index < 0 || index >= loadedTracksData.length) return;
+currentTrackIndex = index;
+const track = loadedTracksData[index];
+if (!track.audioUrl) {
+advanceQueueNext();
+return;
+}
+refreshPlaylistQueue({ fetchNewData: false });
+audioPlayerContainer.classList.remove('hidden');
+nowPlayingSource.textContent = track.sourceName.toUpperCase();
+nowPlayingTitle.textContent = track.episodeTitle;
+nowPlayingDate.textContent = track.time;
+audioPlayer.src = track.audioUrl;
+audioPlayer.play().catch(function(err) { console.log('Interactivity barrier blocked track launch', err); });
+}
+function advanceQueueNext() {
+const nextIndex = currentTrackIndex + 1;
+if (nextIndex < loadedTracksData.length) {
+playIndex(nextIndex);
+} else {
+currentTrackIndex = -1;
+refreshPlaylistQueue({ fetchNewData: false });
+audioPlayerContainer.classList.add('hidden');
+}
+}
+function advanceQueuePrev() {
+if (currentTrackIndex > 0) {
+playIndex(currentTrackIndex - 1);
+}
 }
 async function refreshPlaylistQueue(options) {
 if (!options) options = { fetchNewData: true };
@@ -346,42 +362,23 @@ if (firstValidIndex !== -1) playIndex(firstValidIndex);
 }
 updateNavigationButtons();
 }
-function playIndex(index) {
-if (index < 0 || index >= loadedTracksData.length) return;
-currentTrackIndex = index;
-const track = loadedTracksData[index];
-if (!track.audioUrl) {
-advanceQueueNext();
-return;
-}
-refreshPlaylistQueue({ fetchNewData: false });
-audioPlayerContainer.classList.remove('hidden');
-nowPlayingSource.textContent = track.sourceName.toUpperCase();
-nowPlayingTitle.textContent = track.episodeTitle;
-nowPlayingDate.textContent = track.time;
-audioPlayer.src = track.audioUrl;
-audioPlayer.play().catch(function(err) { console.log('Interactivity barrier blocked track launch', err); });
-}
-function advanceQueueNext() {
-const nextIndex = currentTrackIndex + 1;
-if (nextIndex < loadedTracksData.length) {
-playIndex(nextIndex);
-} else {
-currentTrackIndex = -1;
-refreshPlaylistQueue({ fetchNewData: false });
-audioPlayerContainer.classList.add('hidden');
-}
-}
-function advanceQueuePrev() {
-if (currentTrackIndex > 0) {
-playIndex(currentTrackIndex - 1);
-}
-}
-function updateNavigationButtons() {
-btnPrev.disabled = currentTrackIndex <= 0;
-btnNext.disabled = currentTrackIndex === -1 || currentTrackIndex >= loadedTracksData.length - 1;
-btnPrev.style.opacity = btnPrev.disabled ? '0.3' : '1';
-btnNext.style.opacity = btnNext.disabled ? '0.3' : '1';
+function initApp() {
+activeQueueOrder = activeQueueOrder.filter(function(id) { return SHOW_LOOKUP[id]; });
+localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
+autoplayToggle.checked = autoplayEnabled;
+autoplayToggle.addEventListener('change', function(e) {
+autoplayEnabled = e.target.checked;
+localStorage.setItem('newsAutoplay', JSON.stringify(autoplayEnabled));
+});
+btnRw10.addEventListener('click', function() { audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10); });
+btnFf10.addEventListener('click', function() { audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + 10); });
+btnPrev.addEventListener('click', advanceQueuePrev);
+btnNext.addEventListener('click', advanceQueueNext);
+btnRefresh.addEventListener('click', function() { refreshPlaylistQueue({ fetchNewData: true }); });
+buildLibrarySelector();
+initSortableEngine();
+refreshPlaylistQueue();
 }
 audioPlayer.addEventListener('ended', advanceQueueNext);
 initApp();
+
