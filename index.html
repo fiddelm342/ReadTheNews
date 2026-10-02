@@ -219,33 +219,46 @@
         }
 
         async function fetchFeedItem(showId) {
-            const show = SHOW_LOOKUP[showId];
-            if (!show) return null;
-            try {
-                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(show.url)}`;
-                const response = await fetch(proxyUrl);
-                if (!response.ok) throw new Error();
-                const data = await response.json();
-                
-                const parser = new DOMParser();
-                const xmlDoc = parser.parseFromString(data.contents, "text/xml");
-                const firstItem = xmlDoc.querySelector("item");
-                
-                if (firstItem) {
-                    const title = firstItem.querySelector("title")?.textContent || show.name;
-                    const audioUrl = firstItem.querySelector("enclosure")?.getAttribute("url");
-                    const pubDateStr = firstItem.querySelector("pubDate")?.textContent || "";
-                    const formattedDate = pubDateStr ? new Date(pubDateStr).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
-
-                    if (audioUrl) {
-                        return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl, time: formattedDate };
-                    }
-                }
-            } catch (e) {
-                console.error(`Error parsing track channel ${show.name}`, e);
-            }
-            return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable or tracking offline", audioUrl: null, time: "" };
+    const show = SHOW_LOOKUP[showId];
+    if (!show) return null;
+    try {
+        // Using corsproxy.io as the primary (more reliable for audio feeds), 
+        // or you can use `https://api.allorigins.win/raw?url=${encodeURIComponent(show.url)}`
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(show.url)}`;
+        const response = await fetch(proxyUrl);
+        
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        
+        // Fetch raw text instead of expecting a JSON wrapper
+        const textData = await response.text();
+        
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(textData, "text/xml");
+        
+        // Check for parsing errors
+        const parseError = xmlDoc.querySelector("parsererror");
+        if (parseError) {
+            console.error("XML Parsing Error:", parseError.textContent);
+            throw new Error("Failed to parse XML");
         }
+
+        const firstItem = xmlDoc.querySelector("item");
+        
+        if (firstItem) {
+            const title = firstItem.querySelector("title")?.textContent || show.name;
+            const audioUrl = firstItem.querySelector("enclosure")?.getAttribute("url");
+            const pubDateStr = firstItem.querySelector("pubDate")?.textContent || "";
+            const formattedDate = pubDateStr ? new Date(pubDateStr).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
+
+            if (audioUrl) {
+                return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl, time: formattedDate };
+            }
+        }
+    } catch (e) {
+        console.error(`Error parsing track channel ${show.name}:`, e);
+    }
+    return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable or tracking offline", audioUrl: null, time: "" };
+}
 
         async function refreshPlaylistQueue(options = { fetchNewData: true }) {
             if (activeQueueOrder.length === 0) {
