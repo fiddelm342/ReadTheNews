@@ -218,61 +218,38 @@
             refreshPlaylistQueue();
         }
 
-    async function fetchFeedItem(showId) {
+        async function fetchFeedItem(showId) {
     const show = SHOW_LOOKUP[showId];
     if (!show) return null;
 
-    // A waterfall of proxies to try if one is blocked or rate-limited
-    const proxies = [
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(show.url)}`,
-        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(show.url)}`,
-        `https://corsproxy.io/?${encodeURIComponent(show.url)}`
-    ];
-
-    let textData = null;
-    let lastError = null;
-
-    // Try each proxy until one returns a successful 200 OK response
-    for (const proxyUrl of proxies) {
-        try {
-            const response = await fetch(proxyUrl);
-            if (response.ok) {
-                textData = await response.text();
-                break; // Success! Exit the loop.
-            }
-        } catch (e) {
-            lastError = e;
-            console.warn(`Proxy failed for ${show.name}, trying next...`);
-        }
-    }
-
-    if (!textData) {
-        console.error(`All proxies failed for ${show.name}. Network might be blocking them.`, lastError);
-        return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable or tracking offline", audioUrl: null, time: "" };
-    }
-
     try {
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(textData, "text/xml");
+        // Use rss2json to handle both CORS and the XML parsing server-side
+        const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(show.url)}`;
+        const response = await fetch(apiUrl);
         
-        // Catch HTML error pages masquerading as XML
-        const parseError = xmlDoc.querySelector("parsererror");
-        if (parseError) throw new Error("Received HTML error page instead of XML");
-
-        const firstItem = xmlDoc.querySelector("item");
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         
-        if (firstItem) {
-            const title = firstItem.querySelector("title")?.textContent || show.name;
-            const audioUrl = firstItem.querySelector("enclosure")?.getAttribute("url");
-            const pubDateStr = firstItem.querySelector("pubDate")?.textContent || "";
-            const formattedDate = pubDateStr ? new Date(pubDateStr).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
+        const data = await response.json();
+        
+        // rss2json returns a 'status' field we can check
+        if (data.status === 'ok' && data.items && data.items.length > 0) {
+            const firstItem = data.items[0];
+            
+            const title = firstItem.title || show.name;
+            // The audio file is extracted into the 'enclosure' object
+            const audioUrl = firstItem.enclosure?.link; 
+            const pubDateStr = firstItem.pubDate || "";
+            
+            const formattedDate = pubDateStr ? new Date(pubDateStr.replace(/-/g, '/')).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
 
             if (audioUrl) {
                 return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl, time: formattedDate };
             }
+        } else {
+            console.warn(`Feed parsed but no audio found for ${show.name}`, data);
         }
     } catch (e) {
-        console.error(`Error parsing XML for ${show.name}:`, e);
+        console.error(`Error fetching feed for ${show.name}:`, e);
     }
     
     return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable or tracking offline", audioUrl: null, time: "" };
