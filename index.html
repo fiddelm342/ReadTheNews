@@ -1,3 +1,4 @@
+html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -29,6 +30,12 @@
     </header>
 
     <main class="flex-1 max-w-xl w-full mx-auto p-4 space-y-6 pb-40">
+        <!-- Error Banner Console -->
+        <div id="debug-banner" class="hidden bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-lg text-xs space-y-1">
+            <p class="font-bold">⚠️ Connection Warning</p>
+            <p class="text-slate-600">Some feeds couldn't bypass CORS constraints. Retrying with fallback channels...</p>
+        </div>
+
         <section class="space-y-2">
             <div class="flex justify-between items-center">
                 <h2 class="text-md font-semibold text-slate-600 uppercase tracking-wider text-xs">Your Playlist Order (Drag to Reorder)</h2>
@@ -125,9 +132,10 @@
             {
                 category: "Sports & Entertainment",
                 shows: [
-                    { id: "espn_flash", name: "ESPN SportsCenter Flash", url: "https://megaphone.fm" },
-                    { id: "cbs_sports", name: "CBS Sports Minute", url: "https://megaphone.fm" },
-                    { id: "nbc_pft", name: "NBC Sports Pro Football Talk", url: "https://megaphone.fm" },
+
+{ id: "espn_flash", name: "ESPN SportsCenter Flash", url: "megaphone.fm" },
+{ id: "cbs_sports", name: "CBS Sports Minute", url: "megaphone.fm" },
+{ id: "nbc_pft", name: "NBC Sports Pro Football Talk", url: "megaphone.fm" },
 { id: "thr_news", name: "The Hollywood Reporter News", url: "megaphone.fm" },
 { id: "billboard", name: "Billboard News", url: "megaphone.fm" }
 ]
@@ -146,6 +154,7 @@ const nowPlayingSource = document.getElementById('now-playing-source');
 const nowPlayingTitle = document.getElementById('now-playing-title');
 const nowPlayingDate = document.getElementById('now-playing-date');
 const btnRefresh = document.getElementById('btn-refresh');
+const debugBanner = document.getElementById('debug-banner');
 const btnPrev = document.getElementById('btn-prev');
 const btnNext = document.getElementById('btn-next');
 const btnRw10 = document.getElementById('btn-rw10');
@@ -154,68 +163,38 @@ let activeQueueOrder = JSON.parse(localStorage.getItem('newsQueueOrder')) || ['n
 let autoplayEnabled = JSON.parse(localStorage.getItem('newsAutoplay')) || false;
 let loadedTracksData = [];
 let currentTrackIndex = -1;
-function buildLibrarySelector() {
-libraryContainer.innerHTML = '';
-FULL_LIBRARY.forEach(function(cat) {
-const block = document.createElement('div');
-block.className = 'space-y-2';
-const header = document.createElement('h3');
-header.className = 'text-xs font-bold text-blue-900 border-l-2 border-blue-900 pl-2 mb-2';
-header.textContent = cat.category;
-block.appendChild(header);
-const listGrid = document.createElement('div');
-listGrid.className = 'grid grid-cols-1 gap-1.5';
-cat.shows.forEach(function(show) {
-const checked = activeQueueOrder.includes(show.id);
-const label = document.createElement('label');
-label.className = 'flex items-center space-x-3 p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer text-xs select-none';
-const input = document.createElement('input');
-input.type = 'checkbox';
-input.setAttribute('data-id', show.id);
-input.checked = checked;
-input.className = 'w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500';
-input.addEventListener('change', toggleShowSelection);
-const span = document.createElement('span');
-span.className = 'text-slate-700 font-medium';
-span.textContent = show.name;
-label.appendChild(input);
-label.appendChild(span);
-listGrid.appendChild(label);
-});
-block.appendChild(listGrid);
-libraryContainer.appendChild(block);
-});
+// 1. UTILITY CORES DEFINED UPFRONT
+function updateNavigationButtons() {
+btnPrev.disabled = currentTrackIndex <= 0;
+btnNext.disabled = currentTrackIndex === -1 || currentTrackIndex >= loadedTracksData.length - 1;
+btnPrev.style.opacity = btnPrev.disabled ? '0.3' : '1';
+btnNext.style.opacity = btnNext.disabled ? '0.3' : '1';
 }
-function initSortableEngine() {
-Sortable.create(queueContainer, {
-animation: 150,
-handle: '.drag-handle',
-onEnd: function() {
-const currentCards = queueContainer.querySelectorAll('[data-queue-id]');
-activeQueueOrder = Array.from(currentCards).map(function(card) { return card.getAttribute('data-queue-id'); });
-localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
-refreshPlaylistQueue({ fetchNewData: false });
-}
-});
-}
-function toggleShowSelection(e) {
-const id = e.target.getAttribute('data-id');
-if (e.target.checked) {
-if (!activeQueueOrder.includes(id)) activeQueueOrder.push(id);
+function advanceQueueNext() {
+const nextIndex = currentTrackIndex + 1;
+if (nextIndex < loadedTracksData.length) {
+playIndex(nextIndex);
 } else {
-activeQueueOrder = activeQueueOrder.filter(function(item) { return item !== id; });
+currentTrackIndex = -1;
+refreshPlaylistQueue({ fetchNewData: false });
+audioPlayerContainer.classList.add('hidden');
 }
-localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
-refreshPlaylistQueue();
+}
+function advanceQueuePrev() {
+if (currentTrackIndex > 0) {
+playIndex(currentTrackIndex - 1);
+}
 }
 async function fetchXMLWithFallback(targetUrl) {
+// Channel Pipe 1: Primary Proxy
 try {
-const url = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
+const url = 'corsproxy.io?' + encodeURIComponent(targetUrl);
 const response = await fetch(url);
 if (response.ok) return await response.text();
 } catch (e) {
-console.warn('Primary CORS proxy offline, falling back...', e);
+console.warn('CorsProxy restricted, moving to backup cluster...');
 }
+// Channel Pipe 2: Secondary Proxy
 try {
 const url = 'allorigins.win' + encodeURIComponent(targetUrl) + '&_cb=' + Date.now();
 const response = await fetch(url);
@@ -224,7 +203,8 @@ const data = await response.json();
 return data.contents;
 }
 } catch (e) {
-console.error('All routing endpoints blocked.', e);
+if (debugBanner) debugBanner.classList.remove('hidden');
+console.error('All routing endpoints blocked.');
 }
 throw new Error('Network proxy error');
 }
@@ -251,14 +231,9 @@ return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl: audio
 } catch (e) {
 console.error('Error parsing feed: ' + show.name, e);
 }
-return { id: showId, sourceName: show.name, episodeTitle: 'Feed temporarily unavailable', audioUrl: null, time: '' };
+return { id: showId, sourceName: show.name, episodeTitle: 'Feed temporarily offline', audioUrl: null, time: '' };
 }
-function updateNavigationButtons() {
-btnPrev.disabled = currentTrackIndex <= 0;
-btnNext.disabled = currentTrackIndex === -1 || currentTrackIndex >= loadedTracksData.length - 1;
-btnPrev.style.opacity = btnPrev.disabled ? '0.3' : '1';
-btnNext.style.opacity = btnNext.disabled ? '0.3' : '1';
-}
+// 2. RENDERING AND RUNTIME ENGINES
 function playIndex(index) {
 if (index < 0 || index >= loadedTracksData.length) return;
 currentTrackIndex = index;
@@ -273,22 +248,7 @@ nowPlayingSource.textContent = track.sourceName.toUpperCase();
 nowPlayingTitle.textContent = track.episodeTitle;
 nowPlayingDate.textContent = track.time;
 audioPlayer.src = track.audioUrl;
-audioPlayer.play().catch(function(err) { console.log('Interactivity barrier blocked track launch', err); });
-}
-function advanceQueueNext() {
-const nextIndex = currentTrackIndex + 1;
-if (nextIndex < loadedTracksData.length) {
-playIndex(nextIndex);
-} else {
-currentTrackIndex = -1;
-refreshPlaylistQueue({ fetchNewData: false });
-audioPlayerContainer.classList.add('hidden');
-}
-}
-function advanceQueuePrev() {
-if (currentTrackIndex > 0) {
-playIndex(currentTrackIndex - 1);
-}
+audioPlayer.play().catch(function(err) { console.log('Interactivity barrier handled', err); });
 }
 async function refreshPlaylistQueue(options) {
 if (!options) options = { fetchNewData: true };
@@ -361,6 +321,61 @@ if (firstValidIndex !== -1) playIndex(firstValidIndex);
 }
 updateNavigationButtons();
 }
+function toggleShowSelection(e) {
+const id = e.target.getAttribute('data-id');
+if (e.target.checked) {
+if (!activeQueueOrder.includes(id)) activeQueueOrder.push(id);
+} else {
+activeQueueOrder = activeQueueOrder.filter(function(item) { return item !== id; });
+}
+localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
+refreshPlaylistQueue();
+}
+function buildLibrarySelector() {
+libraryContainer.innerHTML = '';
+FULL_LIBRARY.forEach(function(cat) {
+const block = document.createElement('div');
+block.className = 'space-y-2';
+const header = document.createElement('h3');
+header.className = 'text-xs font-bold text-blue-900 border-l-2 border-blue-900 pl-2 mb-2';
+header.textContent = cat.category;
+block.appendChild(header);
+const listGrid = document.createElement('div');
+listGrid.className = 'grid grid-cols-1 gap-1.5';
+cat.shows.forEach(function(show) {
+const checked = activeQueueOrder.includes(show.id);
+const label = document.createElement('label');
+label.className = 'flex items-center space-x-3 p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer text-xs select-none';
+const input = document.createElement('input');
+input.type = 'checkbox';
+input.setAttribute('data-id', show.id);
+input.checked = checked;
+input.className = 'w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500';
+input.addEventListener('change', toggleShowSelection);
+const span = document.createElement('span');
+span.className = 'text-slate-700 font-medium';
+span.textContent = show.name;
+label.appendChild(input);
+label.appendChild(span);
+listGrid.appendChild(label);
+});
+block.appendChild(listGrid);
+libraryContainer.appendChild(block);
+});
+}
+function initSortableEngine() {
+Sortable.create(queueContainer, {
+animation: 150,
+handle: '.drag-handle',
+onEnd: function() {
+const currentCards = queueContainer.querySelectorAll('[data-queue-id]');
+activeQueueOrder = Array.from(currentCards).map(function(card) { return card.getAttribute('data-queue-id'); });
+localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
+refreshPlaylistQueue({ fetchNewData: false });
+}
+});
+}
+// 3. SECURE MASTER INITIALIZATION CALL AT THE BOTTOM
 function initApp() {
 activeQueueOrder = activeQueueOrder.filter(function(id) { return SHOW_LOOKUP[id]; });
 localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
@@ -379,5 +394,7 @@ initSortableEngine();
 refreshPlaylistQueue();
 }
 audioPlayer.addEventListener('ended', advanceQueueNext);
+// Final execute
 initApp();
+
 
