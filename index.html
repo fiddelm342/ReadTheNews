@@ -199,7 +199,7 @@
         animation: 150,
         handle: '.drag-handle',
         onEnd: () => {
-            // 1. Remember the ID of the currently playing track before we reorder
+            // 1. Remember the ID of the currently playing track
             let currentPlayingId = null;
             if (currentTrackIndex >= 0 && currentTrackIndex < loadedTracksData.length) {
                 currentPlayingId = loadedTracksData[currentTrackIndex].id;
@@ -210,22 +210,24 @@
             activeQueueOrder = Array.from(currentCards).map(card => card.getAttribute('data-queue-id'));
             localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
             
-            // 3. Reorder the background data array to match the new queue order
+            // 3. Reorder the background data array
             loadedTracksData.sort((a, b) => {
                 return activeQueueOrder.indexOf(a.id) - activeQueueOrder.indexOf(b.id);
             });
 
-            // 4. Find where the currently playing track moved to and update its index
+            // 4. Update the playing index
             if (currentPlayingId) {
                 currentTrackIndex = loadedTracksData.findIndex(t => t.id === currentPlayingId);
             }
 
-            // 5. Redraw the UI with the newly sorted data
-            refreshPlaylistQueue({ fetchNewData: false }); 
+            // 5. Use setTimeout to break the synchronous chain so SortableJS can 
+            // finish its internal cleanup before we overwrite the DOM.
+            setTimeout(() => {
+                refreshPlaylistQueue({ fetchNewData: false }); 
+            }, 50);
         }
     });
 }
-
         function toggleShowSelection(e) {
             const id = e.target.getAttribute('data-id');
             if (e.target.checked) {
