@@ -165,6 +165,19 @@
             btnPrev.addEventListener('click', advanceQueuePrev);
             btnNext.addEventListener('click', advanceQueueNext);
 
+            if ('mediaSession' in navigator) {
+            navigator.mediaSession.setActionHandler('play', () => audioPlayer.play());
+            navigator.mediaSession.setActionHandler('pause', () => audioPlayer.pause());
+            navigator.mediaSession.setActionHandler('previoustrack', advanceQueuePrev);
+            navigator.mediaSession.setActionHandler('nexttrack', advanceQueueNext);
+            navigator.mediaSession.setActionHandler('seekbackward', () => {
+            audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10);
+        });
+        navigator.mediaSession.setActionHandler('seekforward', () => {
+            audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + 10);
+        });
+    }
+
             buildLibrarySelector();
             initSortableEngine();
             refreshPlaylistQueue();
@@ -379,8 +392,21 @@ function playIndex(index) {
     nowPlayingDate.textContent = track.time;
 
     audioPlayer.src = track.audioUrl;
-    
-    // Return the promise so we can handle browser blocking upstream
+
+    // --- ADD THIS NEW BLOCK ---
+    if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: track.episodeTitle,
+            artist: track.sourceName,
+            album: 'My News Briefing',
+            artwork: [
+                { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+                { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }
+            ]
+        });
+    }
+    // --------------------------
+
     return audioPlayer.play();
 }
 
