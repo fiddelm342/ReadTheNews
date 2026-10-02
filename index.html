@@ -195,17 +195,36 @@
         }
 
         function initSortableEngine() {
-            Sortable.create(queueContainer, {
-                animation: 150,
-                handle: '.drag-handle',
-                onEnd: () => {
-                    const currentCards = queueContainer.querySelectorAll('[data-queue-id]');
-                    activeQueueOrder = Array.from(currentCards).map(card => card.getAttribute('data-queue-id'));
-                    localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
-                    refreshPlaylistQueue({ fetchNewData: false }); 
-                }
+    Sortable.create(queueContainer, {
+        animation: 150,
+        handle: '.drag-handle',
+        onEnd: () => {
+            // 1. Remember the ID of the currently playing track before we reorder
+            let currentPlayingId = null;
+            if (currentTrackIndex >= 0 && currentTrackIndex < loadedTracksData.length) {
+                currentPlayingId = loadedTracksData[currentTrackIndex].id;
+            }
+
+            // 2. Read the new visual order and save it
+            const currentCards = queueContainer.querySelectorAll('[data-queue-id]');
+            activeQueueOrder = Array.from(currentCards).map(card => card.getAttribute('data-queue-id'));
+            localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
+            
+            // 3. Reorder the background data array to match the new queue order
+            loadedTracksData.sort((a, b) => {
+                return activeQueueOrder.indexOf(a.id) - activeQueueOrder.indexOf(b.id);
             });
+
+            // 4. Find where the currently playing track moved to and update its index
+            if (currentPlayingId) {
+                currentTrackIndex = loadedTracksData.findIndex(t => t.id === currentPlayingId);
+            }
+
+            // 5. Redraw the UI with the newly sorted data
+            refreshPlaylistQueue({ fetchNewData: false }); 
         }
+    });
+}
 
         function toggleShowSelection(e) {
             const id = e.target.getAttribute('data-id');
