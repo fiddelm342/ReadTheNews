@@ -339,16 +339,23 @@
             audioPlayer.play().catch(err => console.log("Interactivity restriction blocked autoplay:", err));
         }
 
-        function advanceQueueNext() {
-            const nextIndex = currentTrackIndex + 1;
-            if (nextIndex < loadedTracksData.length) {
-                playIndex(nextIndex);
-            } else {
-                currentTrackIndex = -1;
-                refreshPlaylistQueue({ fetchNewData: false });
-                audioPlayerContainer.classList.add('hidden');
-            }
-        }
+function advanceQueueNext() {
+    const nextIndex = currentTrackIndex + 1;
+    
+    if (nextIndex < loadedTracksData.length) {
+        // Move to the next track if available
+        playIndex(nextIndex);
+    } else {
+        // We've reached the end of the playlist.
+        // Stop playing and reset the audio to the beginning of the track.
+        audioPlayer.pause();
+        audioPlayer.currentTime = 0; 
+        
+        // By NOT resetting the currentTrackIndex and NOT adding the 'hidden' 
+        // class to the container, the player stays on screen with the 
+        // "Previous" button remaining active.
+    }
+}
 
         function advanceQueuePrev() {
             if (currentTrackIndex > 0) {
