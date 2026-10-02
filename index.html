@@ -218,29 +218,46 @@
             refreshPlaylistQueue();
         }
 
-        async function fetchFeedItem(showId) {
+    async function fetchFeedItem(showId) {
     const show = SHOW_LOOKUP[showId];
     if (!show) return null;
+
+    // A waterfall of proxies to try if one is blocked or rate-limited
+    const proxies = [
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(show.url)}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(show.url)}`,
+        `https://corsproxy.io/?${encodeURIComponent(show.url)}`
+    ];
+
+    let textData = null;
+    let lastError = null;
+
+    // Try each proxy until one returns a successful 200 OK response
+    for (const proxyUrl of proxies) {
+        try {
+            const response = await fetch(proxyUrl);
+            if (response.ok) {
+                textData = await response.text();
+                break; // Success! Exit the loop.
+            }
+        } catch (e) {
+            lastError = e;
+            console.warn(`Proxy failed for ${show.name}, trying next...`);
+        }
+    }
+
+    if (!textData) {
+        console.error(`All proxies failed for ${show.name}. Network might be blocking them.`, lastError);
+        return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable or tracking offline", audioUrl: null, time: "" };
+    }
+
     try {
-        // Using corsproxy.io as the primary (more reliable for audio feeds), 
-        // or you can use `https://api.allorigins.win/raw?url=${encodeURIComponent(show.url)}`
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(show.url)}`;
-        const response = await fetch(proxyUrl);
-        
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        
-        // Fetch raw text instead of expecting a JSON wrapper
-        const textData = await response.text();
-        
         const parser = new DOMParser();
         const xmlDoc = parser.parseFromString(textData, "text/xml");
         
-        // Check for parsing errors
+        // Catch HTML error pages masquerading as XML
         const parseError = xmlDoc.querySelector("parsererror");
-        if (parseError) {
-            console.error("XML Parsing Error:", parseError.textContent);
-            throw new Error("Failed to parse XML");
-        }
+        if (parseError) throw new Error("Received HTML error page instead of XML");
 
         const firstItem = xmlDoc.querySelector("item");
         
@@ -255,8 +272,9 @@
             }
         }
     } catch (e) {
-        console.error(`Error parsing track channel ${show.name}:`, e);
+        console.error(`Error parsing XML for ${show.name}:`, e);
     }
+    
     return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable or tracking offline", audioUrl: null, time: "" };
 }
 
