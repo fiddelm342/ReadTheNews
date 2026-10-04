@@ -390,9 +390,16 @@ function playIndex(index) {
         return;
     }
 
-    // 1. TRIGGER AUDIO FIRST: Keep the background context alive instantly
+    // 1. Force native autoplay to bypass background deep-sleep restrictions
+    audioPlayer.autoplay = true; 
     audioPlayer.src = track.audioUrl;
+    
+    // Catch and suppress the error if the OS blocks the explicit JS play command,
+    // allowing the native autoplay (set above) to take over when ready.
     const playPromise = audioPlayer.play();
+    if (playPromise !== undefined) {
+        playPromise.catch(err => console.log("Relying on native autoplay in background."));
+    }
 
     // 2. Update basic text elements
     audioPlayerContainer.classList.remove('hidden');
@@ -417,8 +424,6 @@ function playIndex(index) {
     if (document.visibilityState === 'visible') {
         refreshPlaylistQueue({ fetchNewData: false });
     }
-
-    return playPromise;
 }
 
 function advanceQueueNext() {
@@ -453,6 +458,11 @@ function advanceQueueNext() {
             btnNext.style.opacity = btnNext.disabled ? "0.3" : "1";
         }
 
+        // If the network times out in deep sleep, skip to the next track instead of dying
+        audioPlayer.addEventListener('error', (e) => {
+        console.warn("Track failed to load in background, skipping...", e);
+        advanceQueueNext();
+        });
         audioPlayer.addEventListener('ended', advanceQueueNext);
 
         initApp();
