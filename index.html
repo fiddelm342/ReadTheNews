@@ -154,10 +154,16 @@
         let currentTrackIndex = -1;
 
         function initApp() {
+            // Refresh the UI highlight when waking the phone up
+            document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && loadedTracksData.length > 0) {
+                refreshPlaylistQueue({ fetchNewData: false });
+            }
+            });
             autoplayToggle.checked = autoplayEnabled;
             autoplayToggle.addEventListener('change', (e) => {
-                autoplayEnabled = e.target.checked;
-                localStorage.setItem('newsAutoplay', JSON.stringify(autoplayEnabled));
+            autoplayEnabled = e.target.checked;
+            localStorage.setItem('newsAutoplay', JSON.stringify(autoplayEnabled));
             });
 
             btnRw10.addEventListener('click', () => { audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10); });
@@ -384,16 +390,17 @@ function playIndex(index) {
         return;
     }
 
-    refreshPlaylistQueue({ fetchNewData: false });
+    // 1. TRIGGER AUDIO FIRST: Keep the background context alive instantly
+    audioPlayer.src = track.audioUrl;
+    const playPromise = audioPlayer.play();
 
+    // 2. Update basic text elements
     audioPlayerContainer.classList.remove('hidden');
     nowPlayingSource.textContent = track.sourceName.toUpperCase();
     nowPlayingTitle.textContent = track.episodeTitle;
     nowPlayingDate.textContent = track.time;
 
-    audioPlayer.src = track.audioUrl;
-
-    // --- ADD THIS NEW BLOCK ---
+    // 3. Push to Lock Screen
     if ('mediaSession' in navigator) {
         navigator.mediaSession.metadata = new MediaMetadata({
             title: track.episodeTitle,
@@ -405,9 +412,13 @@ function playIndex(index) {
             ]
         });
     }
-    // --------------------------
 
-    return audioPlayer.play();
+    // 4. Update the visual queue ONLY if the screen is awake
+    if (document.visibilityState === 'visible') {
+        refreshPlaylistQueue({ fetchNewData: false });
+    }
+
+    return playPromise;
 }
 
 function advanceQueueNext() {
