@@ -68,6 +68,7 @@
             </div>
 
             <audio id="main-audio-player" controls class="w-full h-8 mt-1"></audio>
+            <audio id="preload-audio" preload="auto" class="hidden"></audio>
         </div>
     </footer>
 
@@ -138,6 +139,8 @@
         const autoplayToggle = document.getElementById('autoplay-toggle');
         const audioPlayerContainer = document.getElementById('audio-player-container');
         const audioPlayer = document.getElementById('main-audio-player');
+        const preloadAudio = document.getElementById('preload-audio'); 
+        const nowPlayingSource = document.getElementById('now-playing-source');
         const nowPlayingSource = document.getElementById('now-playing-source');
         const nowPlayingTitle = document.getElementById('now-playing-title');
         const nowPlayingDate = document.getElementById('now-playing-date');
@@ -390,24 +393,36 @@ function playIndex(index) {
         return;
     }
 
-    // 1. Force native autoplay to bypass background deep-sleep restrictions
+    // 1. Force native autoplay and EXPLICITLY call .load()
+    // This forces the browser to synchronously allocate the network request
     audioPlayer.autoplay = true; 
     audioPlayer.src = track.audioUrl;
+    audioPlayer.load(); 
     
-    // Catch and suppress the error if the OS blocks the explicit JS play command,
-    // allowing the native autoplay (set above) to take over when ready.
     const playPromise = audioPlayer.play();
     if (playPromise !== undefined) {
         playPromise.catch(err => console.log("Relying on native autoplay in background."));
     }
 
-    // 2. Update basic text elements
+    // --- 2. NEW PRELOAD LOGIC ---
+    // Look ahead to the next track and silently load its headers.
+    // This keeps the phone's radio awake and prevents the deep-sleep timeout.
+    const nextIndex = currentTrackIndex + 1;
+    if (nextIndex < loadedTracksData.length) {
+        const nextTrack = loadedTracksData[nextIndex];
+        if (nextTrack && nextTrack.audioUrl) {
+            preloadAudio.src = nextTrack.audioUrl;
+        }
+    }
+    // -----------------------------
+
+    // 3. Update basic text elements
     audioPlayerContainer.classList.remove('hidden');
     nowPlayingSource.textContent = track.sourceName.toUpperCase();
     nowPlayingTitle.textContent = track.episodeTitle;
     nowPlayingDate.textContent = track.time;
 
-    // 3. Push to Lock Screen
+    // 4. Push to Lock Screen
     if ('mediaSession' in navigator) {
         navigator.mediaSession.metadata = new MediaMetadata({
             title: track.episodeTitle,
@@ -420,7 +435,7 @@ function playIndex(index) {
         });
     }
 
-    // 4. Update the visual queue ONLY if the screen is awake
+    // 5. Update the visual queue ONLY if the screen is awake
     if (document.visibilityState === 'visible') {
         refreshPlaylistQueue({ fetchNewData: false });
     }
