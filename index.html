@@ -399,6 +399,9 @@ function playIndex(index) {
     audioPlayer.currentTime = 0; 
     audioPlayer.className = "hidden";
     audioPlayer.removeAttribute("controls");
+    
+    // CRITICAL FIX: Turn off autoplay so it doesn't immediately play the preloaded track
+    audioPlayer.autoplay = false; 
 
     // Swap the variables (The hidden preloader now becomes the main player)
     let temp = audioPlayer;
