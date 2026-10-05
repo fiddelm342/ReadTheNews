@@ -230,17 +230,37 @@
             refreshPlaylistQueue();
         }
 
-        function buildLibrarySelector() {
+function buildLibrarySelector() {
             libraryContainer.innerHTML = '';
-            FULL_LIBRARY.forEach(cat => {
-                const block = document.createElement('div');
-                block.className = "space-y-2";
-                block.innerHTML = `<h3 class="text-xs font-bold text-blue-900 border-l-2 border-blue-900 pl-2 mb-2">${cat.category}</h3>`;
-                
-                const listGrid = document.createElement('div');
-                listGrid.className = "grid grid-cols-1 gap-1.5";
+            
+            FULL_LIBRARY.forEach((cat, index) => {
+                // 1. Sort the shows alphabetically within this category
+                const sortedShows = [...cat.shows].sort((a, b) => a.name.localeCompare(b.name));
 
-                cat.shows.forEach(show => {
+                // 2. Create a collapsible <details> element
+                const details = document.createElement('details');
+                // Open the first category by default, leave the rest closed
+                if (index === 0) details.setAttribute('open', '');
+                details.className = "group bg-slate-50 rounded-lg border border-slate-200 overflow-hidden";
+
+                // 3. Create the clickable header
+                const summary = document.createElement('summary');
+                // Tailwind classes style the box and hide the default browser triangle
+                summary.className = "text-xs font-bold text-blue-900 p-3 cursor-pointer select-none flex justify-between items-center hover:bg-slate-100 transition list-none [&::-webkit-details-marker]:hidden";
+                summary.innerHTML = `
+                    <span class="flex items-center space-x-2">
+                        <span class="w-1 h-3 bg-blue-900 rounded-full"></span>
+                        <span>${cat.category}</span>
+                    </span>
+                    <!-- Custom chevron arrow that automatically flips when open -->
+                    <svg class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform duration-200" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path></svg>
+                `;
+                
+                // 4. Create the grid for the newly sorted checkboxes
+                const listGrid = document.createElement('div');
+                listGrid.className = "grid grid-cols-1 gap-1.5 p-2 bg-white border-t border-slate-200";
+
+                sortedShows.forEach(show => {
                     const checked = activeQueueOrder.includes(show.id);
                     const label = document.createElement('label');
                     label.className = "flex items-center space-x-3 p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer text-xs select-none";
@@ -252,11 +272,12 @@
                     label.querySelector('input').addEventListener('change', toggleShowSelection);
                     listGrid.appendChild(label);
                 });
-                block.appendChild(listGrid);
-                libraryContainer.appendChild(block);
+
+                details.appendChild(summary);
+                details.appendChild(listGrid);
+                libraryContainer.appendChild(details);
             });
         }
-
         function initSortableEngine() {
             Sortable.create(queueContainer, {
                 animation: 150,
