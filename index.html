@@ -139,8 +139,8 @@
         const autoplayToggle = document.getElementById('autoplay-toggle');
         const audioPlayerContainer = document.getElementById('audio-player-container');
 // Change these two lines from 'const' to 'let'
-        let audioPlayer = document.getElementById('main-audio-player');
-        let preloadAudio = document.getElementById('preload-audio');
+        const audioPlayer = document.getElementById('main-audio-player');
+        const preloadAudio = document.getElementById('preload-audio');
         const nowPlayingSource = document.getElementById('now-playing-source');
         const nowPlayingTitle = document.getElementById('now-playing-title');
         const nowPlayingDate = document.getElementById('now-playing-date');
@@ -155,6 +155,36 @@
         
         let loadedTracksData = []; 
         let currentTrackIndex = -1;
+        let wakeLockCtx = null;
+
+        // Plays an imperceptible silent loop to keep the mobile OS awake
+        function enableBackgroundWakeLock() {
+            if (wakeLockCtx) {
+                if (wakeLockCtx.state === 'suspended') wakeLockCtx.resume();
+                return;
+            }
+            try {
+                wakeLockCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = wakeLockCtx.createOscillator();
+                const gainNode = wakeLockCtx.createGain();
+                
+                oscillator.frequency.value = 1; // 1Hz (inaudible)
+                gainNode.gain.value = 0.001; // Near-zero volume
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(wakeLockCtx.destination);
+                oscillator.start();
+
+                // If created before the user taps the screen, wait for any tap to start it
+                const resumeOnInteract = () => {
+                    if (wakeLockCtx.state === 'suspended') wakeLockCtx.resume();
+                    document.removeEventListener('click', resumeOnInteract);
+                }
+                document.addEventListener('click', resumeOnInteract);
+            } catch (e) {
+                console.log("AudioContext Wake Lock failed", e);
+            }
+        }
 
         function initApp() {
             // Refresh the UI highlight when waking the phone up
@@ -393,50 +423,31 @@ function playIndex(index) {
         return;
     }
 
-    // --- 1. PING-PONG AUDIO SWAP ---
-    // Pause the finished player, reset its time, and hide it
-    audioPlayer.pause();
-    audioPlayer.currentTime = 0; 
-    audioPlayer.className = "hidden";
-    audioPlayer.removeAttribute("controls");
-    
-    // CRITICAL FIX: Turn off autoplay so it doesn't immediately play the preloaded track
-    audioPlayer.autoplay = false; 
+    // 1. Activate Wake Lock & stop any overlapping audio
+    enableBackgroundWakeLock();
+    audioPlayer.pause(); 
+    preloadAudio.pause(); 
 
-    // Swap the variables (The hidden preloader now becomes the main player)
-    let temp = audioPlayer;
-    audioPlayer = preloadAudio;
-    preloadAudio = temp;
-
-    // Apply visible UI styling to the new active player
-    audioPlayer.className = "w-full h-8 mt-1";
-    audioPlayer.setAttribute("controls", "controls");
+    // 2. Play the main track
     audioPlayer.autoplay = true; 
-
-    // If the user clicked a random track out of order, the preloader might have 
-    // the wrong file. This safely corrects it before playing.
-    if (!audioPlayer.src.includes(track.audioUrl)) {
-        audioPlayer.src = track.audioUrl;
-        audioPlayer.load();
-    }
-
+    audioPlayer.src = track.audioUrl;
+    audioPlayer.load(); 
+    
     const playPromise = audioPlayer.play();
     if (playPromise !== undefined) {
-        playPromise.catch(err => console.log("Relying on native autoplay in background."));
+        playPromise.catch(err => console.log("Waiting on native autoplay."));
     }
 
-    // --- 2. PRELOAD THE NEXT TRACK ---
-    // Silently load the next track into the NEW hidden preloader element
+    // 3. Silently fetch the next track into cache
     const nextIndex = currentTrackIndex + 1;
     if (nextIndex < loadedTracksData.length) {
         const nextTrack = loadedTracksData[nextIndex];
         if (nextTrack && nextTrack.audioUrl) {
             preloadAudio.src = nextTrack.audioUrl;
-            preloadAudio.load();
         }
     }
 
-    // --- 3. UPDATE UI & LOCK SCREEN ---
+    // 4. Update UI & Lock Screen
     audioPlayerContainer.classList.remove('hidden');
     nowPlayingSource.textContent = track.sourceName.toUpperCase();
     nowPlayingTitle.textContent = track.episodeTitle;
@@ -491,25 +502,12 @@ function updateNavigationButtons() {
             btnNext.style.opacity = btnNext.disabled ? "0.3" : "1";
         }
 
-        // Wraps the listeners so they apply to both ping-pong elements
-        function setupAudioListeners(playerElement) {
-            playerElement.addEventListener('error', (e) => {
-                // Only skip if the error happens on the currently playing audio
-                if (playerElement === audioPlayer) {
-                    console.warn("Track failed to load, skipping...", e);
-                    advanceQueueNext();
-                }
-            });
-            playerElement.addEventListener('ended', () => {
-                // Only advance the queue if the foreground player finishes
-                if (playerElement === audioPlayer) {
-                    advanceQueueNext();
-                }
-            });
-        }
-        
-        setupAudioListeners(audioPlayer);
-        setupAudioListeners(preloadAudio);
+// Clean, simple listeners attached ONLY to the main player
+        audioPlayer.addEventListener('error', (e) => {
+            console.warn("Track failed to load, skipping...", e);
+            advanceQueueNext();
+        });
+        audioPlayer.addEventListener('ended', advanceQueueNext);
 
         initApp();
     </script>
