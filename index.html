@@ -130,6 +130,14 @@
             }
         ];
 
+        const SHOW_LOOKUP = {};
+        FULL_LIBRARY.forEach(cat => cat.shows.forEach(s => SHOW_LOOKUP[s.id] = s));
+
+        const libraryContainer = document.getElementById('library-container');
+        const queueContainer = document.getElementById('playlist-queue');
+        const autoplayToggle = document.getElementById('autoplay-toggle');
+        const audioPlayerContainer = document.getElementById('audio-player-container');
+
         const audioPlayer = document.getElementById('main-audio-player');
         const nowPlayingSource = document.getElementById('now-playing-source');
         const nowPlayingTitle = document.getElementById('now-playing-title');
@@ -140,23 +148,45 @@
         const btnRw10 = document.getElementById('btn-rw10');
         const btnFf10 = document.getElementById('btn-ff10');
 
-        let activeQueueOrder = JSON.parse(localStorage.getItem('newsQueueOrder')) || ['npr_now', 'cnn_5', 'wsj_whats'];
-        let autoplayEnabled = JSON.parse(localStorage.getItem('newsAutoplay')) || false;
+        // --- BULLETPROOF MEMORY LOADING ---
+        let activeQueueOrder = ['npr_now', 'cnn_5', 'wsj_whats'];
+        try {
+            const savedOrder = localStorage.getItem('newsQueueOrder');
+            if (savedOrder) {
+                const parsed = JSON.parse(savedOrder);
+                if (Array.isArray(parsed)) {
+                    activeQueueOrder = parsed;
+                } else {
+                    localStorage.removeItem('newsQueueOrder');
+                }
+            }
+        } catch(e) {
+            localStorage.removeItem('newsQueueOrder');
+        }
+
+        let autoplayEnabled = false;
+        try {
+            const savedAuto = localStorage.getItem('newsAutoplay');
+            if (savedAuto) autoplayEnabled = (JSON.parse(savedAuto) === true);
+        } catch(e) {
+            localStorage.removeItem('newsAutoplay');
+        }
+        // ----------------------------------
         
         let loadedTracksData = []; 
         let currentTrackIndex = -1;
 
         function initApp() {
-            // Refresh the UI highlight when waking the phone up
             document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && loadedTracksData.length > 0) {
-                refreshPlaylistQueue({ fetchNewData: false });
-            }
+                if (document.visibilityState === 'visible' && loadedTracksData.length > 0) {
+                    refreshPlaylistQueue({ fetchNewData: false });
+                }
             });
+            
             autoplayToggle.checked = autoplayEnabled;
             autoplayToggle.addEventListener('change', (e) => {
-            autoplayEnabled = e.target.checked;
-            localStorage.setItem('newsAutoplay', JSON.stringify(autoplayEnabled));
+                autoplayEnabled = e.target.checked;
+                localStorage.setItem('newsAutoplay', JSON.stringify(autoplayEnabled));
             });
 
             btnRw10.addEventListener('click', () => { audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10); });
@@ -372,23 +402,16 @@
                 return;
             }
 
-            // 1. SET METADATA FIRST
-            // This immediately informs the OS that a continuous media session is proceeding,
-            // locking the background privileges BEFORE the network request causes a delay.
+            // 1. SET METADATA FIRST (Artwork removed to prevent deep sleep freezing)
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.metadata = new MediaMetadata({
                     title: track.episodeTitle,
                     artist: track.sourceName,
-                    album: 'My News Briefing',
-                    artwork: [
-                        { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
-                        { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }
-                    ]
+                    album: 'My News Briefing'
                 });
             }
 
-            // 2. SYNCHRONOUSLY SWAP AND PLAY (NO PAUSE COMMAND)
-            // By NOT calling audioPlayer.pause(), the OS safely transitions the media element
+            // 2. SYNCHRONOUSLY SWAP AND PLAY
             audioPlayer.autoplay = true; 
             audioPlayer.src = track.audioUrl;
             audioPlayer.load(); 
@@ -408,24 +431,17 @@
                 refreshPlaylistQueue({ fetchNewData: false });
             }
         }
-        
-function advanceQueueNext() {
-    const nextIndex = currentTrackIndex + 1;
-    
-    if (nextIndex < loadedTracksData.length) {
-        // Move to the next track if available
-        playIndex(nextIndex);
-    } else {
-        // We've reached the end of the playlist.
-        // Stop playing and reset the audio to the beginning of the track.
-        audioPlayer.pause();
-        audioPlayer.currentTime = 0; 
-        
-        // By NOT resetting the currentTrackIndex and NOT adding the 'hidden' 
-        // class to the container, the player stays on screen with the 
-        // "Previous" button remaining active.
-    }
-}
+
+        function advanceQueueNext() {
+            const nextIndex = currentTrackIndex + 1;
+            
+            if (nextIndex < loadedTracksData.length) {
+                playIndex(nextIndex);
+            } else {
+                audioPlayer.pause();
+                audioPlayer.currentTime = 0; 
+            }
+        }
 
         function advanceQueuePrev() {
             if (currentTrackIndex > 0) {
@@ -433,7 +449,7 @@ function advanceQueueNext() {
             }
         }
 
-function updateNavigationButtons() {
+        function updateNavigationButtons() {
             btnPrev.disabled = currentTrackIndex <= 0;
             btnNext.disabled = currentTrackIndex === -1 || currentTrackIndex >= loadedTracksData.length - 1;
             
@@ -441,7 +457,6 @@ function updateNavigationButtons() {
             btnNext.style.opacity = btnNext.disabled ? "0.3" : "1";
         }
 
-// Clean, simple listeners attached ONLY to the main player
         audioPlayer.addEventListener('error', (e) => {
             console.warn("Track failed to load, skipping...", e);
             advanceQueueNext();
@@ -450,7 +465,7 @@ function updateNavigationButtons() {
 
         initApp();
     </script>
-<script>
+    <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('sw.js').catch(err => {
