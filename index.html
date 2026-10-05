@@ -137,23 +137,45 @@
         const queueContainer = document.getElementById('playlist-queue');
         const autoplayToggle = document.getElementById('autoplay-toggle');
         const audioPlayerContainer = document.getElementById('audio-player-container');
-        
         const audioPlayer = document.getElementById('main-audio-player');
         const nowPlayingSource = document.getElementById('now-playing-source');
         const nowPlayingTitle = document.getElementById('now-playing-title');
         const nowPlayingDate = document.getElementById('now-playing-date');
-        
         const btnPrev = document.getElementById('btn-prev');
         const btnNext = document.getElementById('btn-next');
         const btnRw10 = document.getElementById('btn-rw10');
         const btnFf10 = document.getElementById('btn-ff10');
 
-        // --- THE SILENT HEARTBEAT ---
-        // A base64-encoded, inaudible 1-second audio clip that loops endlessly in the background.
-        // This forces the phone to NEVER drop your network or JS execution privileges.
-        const silentHeartbeat = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
-        silentHeartbeat.loop = true;
-        silentHeartbeat.volume = 0.01;
+        // --- INVISIBLE WEB AUDIO HEARTBEAT ---
+        // Keeps the background active without fighting for Lock Screen Media controls
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let wakeLockCtx = null;
+
+        function enableWebAudioHeartbeat() {
+            if (wakeLockCtx) {
+                if (wakeLockCtx.state === 'suspended') wakeLockCtx.resume();
+                return;
+            }
+            try {
+                wakeLockCtx = new AudioContext();
+                const oscillator = wakeLockCtx.createOscillator();
+                const gainNode = wakeLockCtx.createGain();
+                oscillator.frequency.value = 1; // 1Hz (inaudible)
+                gainNode.gain.value = 0.001;
+                oscillator.connect(gainNode);
+                gainNode.connect(wakeLockCtx.destination);
+                oscillator.start();
+            } catch (e) {
+                console.warn("Web Audio Wake Lock failed", e);
+            }
+        }
+        
+        function disableWebAudioHeartbeat() {
+            if (wakeLockCtx && wakeLockCtx.state === 'running') {
+                wakeLockCtx.suspend();
+            }
+        }
+        // -------------------------------------
 
         let activeQueueOrder = ['npr_now', 'cnn_5', 'wsj_whats'];
         try {
@@ -174,9 +196,9 @@
         let currentTrackIndex = -1;
 
         function initApp() {
-            // Start the heartbeat loop the very first time the user touches the screen
+            // Start the invisible heartbeat engine on the first user interaction
             const startHeartbeat = () => {
-                silentHeartbeat.play().catch(e => console.log("Heartbeat awaiting interaction"));
+                enableWebAudioHeartbeat();
                 document.removeEventListener('click', startHeartbeat);
             };
             document.addEventListener('click', startHeartbeat);
@@ -385,8 +407,7 @@
                 return;
             }
 
-            // Ensure the heartbeat is running
-            if (silentHeartbeat.paused) silentHeartbeat.play().catch(() => {});
+            enableWebAudioHeartbeat();
 
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.metadata = new MediaMetadata({
@@ -396,6 +417,7 @@
                 });
             }
 
+            audioPlayer.autoplay = true;
             audioPlayer.src = track.audioUrl;
             audioPlayer.load(); 
             audioPlayer.play().catch(err => console.log("Waiting on interaction"));
@@ -418,8 +440,7 @@
             } else {
                 audioPlayer.pause();
                 audioPlayer.currentTime = 0;
-                // Allow the phone to finally sleep when the queue is fully empty
-                silentHeartbeat.pause(); 
+                disableWebAudioHeartbeat(); 
             }
         }
 
@@ -437,33 +458,12 @@
             btnNext.style.opacity = btnNext.disabled ? "0.3" : "1";
         }
 
-// Clean, simple listeners attached ONLY to the main player
         audioPlayer.addEventListener('error', (e) => {
             console.warn("Track failed to load, skipping...", e);
             advanceQueueNext();
         });
         
         audioPlayer.addEventListener('ended', advanceQueueNext);
-
-        // --- NEW: KEEP LOCK SCREEN & HEARTBEAT IN SYNC ---
-        audioPlayer.addEventListener('play', () => {
-            // Wake up the heartbeat
-            silentHeartbeat.play().catch(() => {});
-            // Explicitly tell the OS we are playing
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.playbackState = 'playing';
-            }
-        });
-
-        audioPlayer.addEventListener('pause', () => {
-            // Put the heartbeat to sleep so the OS knows we actually stopped
-            silentHeartbeat.pause();
-            // Explicitly tell the OS we are paused
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.playbackState = 'paused';
-            }
-        });
-        // -------------------------------------------------
 
         initApp();
     </script>
