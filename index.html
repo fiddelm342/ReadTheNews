@@ -437,11 +437,33 @@
             btnNext.style.opacity = btnNext.disabled ? "0.3" : "1";
         }
 
+// Clean, simple listeners attached ONLY to the main player
         audioPlayer.addEventListener('error', (e) => {
             console.warn("Track failed to load, skipping...", e);
             advanceQueueNext();
         });
+        
         audioPlayer.addEventListener('ended', advanceQueueNext);
+
+        // --- NEW: KEEP LOCK SCREEN & HEARTBEAT IN SYNC ---
+        audioPlayer.addEventListener('play', () => {
+            // Wake up the heartbeat
+            silentHeartbeat.play().catch(() => {});
+            // Explicitly tell the OS we are playing
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'playing';
+            }
+        });
+
+        audioPlayer.addEventListener('pause', () => {
+            // Put the heartbeat to sleep so the OS knows we actually stopped
+            silentHeartbeat.pause();
+            // Explicitly tell the OS we are paused
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused';
+            }
+        });
+        // -------------------------------------------------
 
         initApp();
     </script>
