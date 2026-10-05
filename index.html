@@ -68,6 +68,8 @@
             </div>
 
             <audio id="main-audio-player" controls class="w-full h-8 mt-1"></audio>
+            <!-- MUTED preloader prevents audio focus stealing while caching the next track -->
+            <audio id="preload-audio" muted class="hidden"></audio>
         </div>
     </footer>
 
@@ -139,6 +141,7 @@
         const audioPlayerContainer = document.getElementById('audio-player-container');
 
         const audioPlayer = document.getElementById('main-audio-player');
+        const preloadAudio = document.getElementById('preload-audio');
         const nowPlayingSource = document.getElementById('now-playing-source');
         const nowPlayingTitle = document.getElementById('now-playing-title');
         const nowPlayingDate = document.getElementById('now-playing-date');
@@ -148,7 +151,6 @@
         const btnRw10 = document.getElementById('btn-rw10');
         const btnFf10 = document.getElementById('btn-ff10');
 
-        // --- BULLETPROOF MEMORY LOADING ---
         let activeQueueOrder = ['npr_now', 'cnn_5', 'wsj_whats'];
         try {
             const savedOrder = localStorage.getItem('newsQueueOrder');
@@ -171,10 +173,10 @@
         } catch(e) {
             localStorage.removeItem('newsAutoplay');
         }
-        // ----------------------------------
         
         let loadedTracksData = []; 
         let currentTrackIndex = -1;
+        let preloadedIndex = -1; // Tracks which file we have already warmed up
 
         function initApp() {
             document.addEventListener('visibilitychange', () => {
@@ -395,6 +397,7 @@
         function playIndex(index) {
             if (index < 0 || index >= loadedTracksData.length) return;
             currentTrackIndex = index;
+            preloadedIndex = -1; // Reset preloader tracking for the new track
             const track = loadedTracksData[index];
 
             if (!track.audioUrl) {
@@ -402,7 +405,6 @@
                 return;
             }
 
-            // 1. SET METADATA FIRST (Artwork removed to prevent deep sleep freezing)
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.metadata = new MediaMetadata({
                     title: track.episodeTitle,
@@ -411,7 +413,6 @@
                 });
             }
 
-            // 2. SYNCHRONOUSLY SWAP AND PLAY
             audioPlayer.autoplay = true; 
             audioPlayer.src = track.audioUrl;
             audioPlayer.load(); 
@@ -421,7 +422,6 @@
                 playPromise.catch(err => console.log("Waiting on native autoplay."));
             }
 
-            // 3. UPDATE VISUAL UI
             audioPlayerContainer.classList.remove('hidden');
             nowPlayingSource.textContent = track.sourceName.toUpperCase();
             nowPlayingTitle.textContent = track.episodeTitle;
@@ -457,10 +457,29 @@
             btnNext.style.opacity = btnNext.disabled ? "0.3" : "1";
         }
 
+        // --- NETWORK WAKE-UP PING ---
+        // Exactly 15 seconds before the current track ends, this forces the phone's 
+        // network antenna to wake up and fetch the next track, beating the Deep Doze timeout.
+        audioPlayer.addEventListener('timeupdate', () => {
+            if (audioPlayer.duration && (audioPlayer.duration - audioPlayer.currentTime < 15)) {
+                const nextIndex = currentTrackIndex + 1;
+                // Only trigger the network ping once per track
+                if (nextIndex < loadedTracksData.length && preloadedIndex !== nextIndex) {
+                    preloadedIndex = nextIndex;
+                    const nextTrack = loadedTracksData[nextIndex];
+                    if (nextTrack && nextTrack.audioUrl) {
+                        preloadAudio.src = nextTrack.audioUrl;
+                        preloadAudio.load(); 
+                    }
+                }
+            }
+        });
+
         audioPlayer.addEventListener('error', (e) => {
             console.warn("Track failed to load, skipping...", e);
             advanceQueueNext();
         });
+        
         audioPlayer.addEventListener('ended', advanceQueueNext);
 
         initApp();
