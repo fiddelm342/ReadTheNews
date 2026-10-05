@@ -67,9 +67,9 @@
                 </button>
             </div>
 
-            <audio id="main-audio-player" controls class="w-full h-8 mt-1"></audio>
-            <!-- MUTED preloader prevents audio focus stealing while caching the next track -->
-            <audio id="preload-audio" muted class="hidden"></audio>
+            <!-- TWO PLAYERS FOR PING PONG SWAPPING -->
+            <audio id="player-a" controls class="w-full h-8 mt-1"></audio>
+            <audio id="player-b" class="hidden"></audio>
         </div>
     </footer>
 
@@ -139,44 +139,39 @@
         const queueContainer = document.getElementById('playlist-queue');
         const autoplayToggle = document.getElementById('autoplay-toggle');
         const audioPlayerContainer = document.getElementById('audio-player-container');
-
-        const audioPlayer = document.getElementById('main-audio-player');
-        const preloadAudio = document.getElementById('preload-audio');
         const nowPlayingSource = document.getElementById('now-playing-source');
         const nowPlayingTitle = document.getElementById('now-playing-title');
         const nowPlayingDate = document.getElementById('now-playing-date');
-
         const btnPrev = document.getElementById('btn-prev');
         const btnNext = document.getElementById('btn-next');
         const btnRw10 = document.getElementById('btn-rw10');
         const btnFf10 = document.getElementById('btn-ff10');
+
+        // MULTI-PLAYER PING PONG VARIABLES
+        const playerA = document.getElementById('player-a');
+        const playerB = document.getElementById('player-b');
+        let activePlayer = playerA;
+        let standbyPlayer = playerB;
+        let isPreloading = false;
+        let preloadedIndex = -1;
 
         let activeQueueOrder = ['npr_now', 'cnn_5', 'wsj_whats'];
         try {
             const savedOrder = localStorage.getItem('newsQueueOrder');
             if (savedOrder) {
                 const parsed = JSON.parse(savedOrder);
-                if (Array.isArray(parsed)) {
-                    activeQueueOrder = parsed;
-                } else {
-                    localStorage.removeItem('newsQueueOrder');
-                }
+                if (Array.isArray(parsed)) activeQueueOrder = parsed;
             }
-        } catch(e) {
-            localStorage.removeItem('newsQueueOrder');
-        }
+        } catch(e) { }
 
         let autoplayEnabled = false;
         try {
             const savedAuto = localStorage.getItem('newsAutoplay');
             if (savedAuto) autoplayEnabled = (JSON.parse(savedAuto) === true);
-        } catch(e) {
-            localStorage.removeItem('newsAutoplay');
-        }
+        } catch(e) { }
         
         let loadedTracksData = []; 
         let currentTrackIndex = -1;
-        let preloadedIndex = -1; // Tracks which file we have already warmed up
 
         function initApp() {
             document.addEventListener('visibilitychange', () => {
@@ -191,27 +186,176 @@
                 localStorage.setItem('newsAutoplay', JSON.stringify(autoplayEnabled));
             });
 
-            btnRw10.addEventListener('click', () => { audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10); });
-            btnFf10.addEventListener('click', () => { audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + 10); });
+            // ROUTE BUTTONS TO THE DYNAMICALLY ACTIVE PLAYER
+            btnRw10.addEventListener('click', () => { activePlayer.currentTime = Math.max(0, activePlayer.currentTime - 10); });
+            btnFf10.addEventListener('click', () => { activePlayer.currentTime = Math.min(activePlayer.duration || 0, activePlayer.currentTime + 10); });
             btnPrev.addEventListener('click', advanceQueuePrev);
             btnNext.addEventListener('click', advanceQueueNext);
 
             if ('mediaSession' in navigator) {
-                navigator.mediaSession.setActionHandler('play', () => audioPlayer.play());
-                navigator.mediaSession.setActionHandler('pause', () => audioPlayer.pause());
+                navigator.mediaSession.setActionHandler('play', () => activePlayer.play());
+                navigator.mediaSession.setActionHandler('pause', () => activePlayer.pause());
                 navigator.mediaSession.setActionHandler('previoustrack', advanceQueuePrev);
                 navigator.mediaSession.setActionHandler('nexttrack', advanceQueueNext);
                 navigator.mediaSession.setActionHandler('seekbackward', () => {
-                    audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10);
+                    activePlayer.currentTime = Math.max(0, activePlayer.currentTime - 10);
                 });
                 navigator.mediaSession.setActionHandler('seekforward', () => {
-                    audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + 10);
+                    activePlayer.currentTime = Math.min(activePlayer.duration || 0, activePlayer.currentTime + 10);
                 });
             }
 
             buildLibrarySelector();
             initSortableEngine();
             refreshPlaylistQueue();
+        }
+
+        // --- PING PONG AUDIO ENGINE ---
+        
+        // 1. Watches the active player. 15 secs before it ends, silently fetches the next track.
+        function handleTimeUpdate(e) {
+            if (e.target !== activePlayer || !activePlayer.duration) return;
+
+            const timeRemaining = activePlayer.duration - activePlayer.currentTime;
+            if (timeRemaining < 15 && !isPreloading) {
+                const nextIdx = currentTrackIndex + 1;
+                if (nextIdx < loadedTracksData.length) {
+                    isPreloading = true;
+                    preloadedIndex = nextIdx;
+                    const nextTrack = loadedTracksData[nextIdx];
+                    if (nextTrack && nextTrack.audioUrl) {
+                        standbyPlayer.src = nextTrack.audioUrl;
+                        standbyPlayer.load(); // Forces network radio ON in deep sleep
+                    }
+                }
+            }
+        }
+
+        // 2. When the active track finishes, swap elements perfectly.
+        function handleEnded(e) {
+            if (e.target !== activePlayer) return;
+
+            const nextIdx = currentTrackIndex + 1;
+            if (nextIdx < loadedTracksData.length) {
+                currentTrackIndex = nextIdx;
+                const track = loadedTracksData[nextIdx];
+
+                // Execute the swap
+                let temp = activePlayer;
+                activePlayer = standbyPlayer;
+                standbyPlayer = temp;
+
+                // Shut down old player
+                standbyPlayer.pause();
+                standbyPlayer.currentTime = 0;
+                standbyPlayer.className = "hidden";
+                standbyPlayer.removeAttribute("controls");
+
+                // Activate new player
+                activePlayer.className = "w-full h-8 mt-1";
+                activePlayer.setAttribute("controls", "controls");
+
+                // If preloader missed the cue, force load it now
+                if (preloadedIndex !== currentTrackIndex || !activePlayer.src.includes(track.audioUrl)) {
+                    activePlayer.src = track.audioUrl;
+                }
+                
+                // Start playback. OS accepts this instantly because the file is cached.
+                activePlayer.play().catch(err => console.log(err));
+                
+                isPreloading = false;
+                updateUIForNewTrack(track);
+            } else {
+                activePlayer.pause();
+                activePlayer.currentTime = 0;
+            }
+        }
+
+        function handleError(e) {
+            if (e.target === activePlayer) {
+                console.warn("Track failed to load, skipping...");
+                advanceQueueNext();
+            }
+        }
+
+        // Attach listeners to both players
+        [playerA, playerB].forEach(player => {
+            player.addEventListener('timeupdate', handleTimeUpdate);
+            player.addEventListener('ended', handleEnded);
+            player.addEventListener('error', handleError);
+        });
+
+        // Manual Track Selection & Startup
+        function playIndex(index) {
+            if (index < 0 || index >= loadedTracksData.length) return;
+            currentTrackIndex = index;
+            const track = loadedTracksData[index];
+
+            if (!track.audioUrl) {
+                advanceQueueNext();
+                return;
+            }
+
+            // Hard reset preloading
+            isPreloading = false;
+            preloadedIndex = -1;
+            standbyPlayer.pause();
+            standbyPlayer.removeAttribute("src");
+
+            // Assure active player is visible
+            activePlayer.className = "w-full h-8 mt-1";
+            activePlayer.setAttribute("controls", "controls");
+            
+            activePlayer.src = track.audioUrl;
+            activePlayer.play().catch(err => console.log(err));
+
+            updateUIForNewTrack(track);
+        }
+
+        function updateUIForNewTrack(track) {
+            audioPlayerContainer.classList.remove('hidden');
+            nowPlayingSource.textContent = track.sourceName.toUpperCase();
+            nowPlayingTitle.textContent = track.episodeTitle;
+            nowPlayingDate.textContent = track.time;
+
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: track.episodeTitle,
+                    artist: track.sourceName,
+                    album: 'My News Briefing'
+                });
+            }
+
+            if (document.visibilityState === 'visible') {
+                refreshPlaylistQueue({ fetchNewData: false });
+            }
+            updateNavigationButtons();
+        }
+
+        // --- END AUDIO ENGINE ---
+
+        function advanceQueueNext() {
+            const nextIndex = currentTrackIndex + 1;
+            if (nextIndex < loadedTracksData.length) {
+                playIndex(nextIndex);
+            } else {
+                activePlayer.pause();
+                activePlayer.currentTime = 0; 
+            }
+        }
+
+        function advanceQueuePrev() {
+            if (currentTrackIndex > 0) {
+                playIndex(currentTrackIndex - 1);
+            }
+        }
+
+        function updateNavigationButtons() {
+            btnPrev.disabled = currentTrackIndex <= 0;
+            btnNext.disabled = currentTrackIndex === -1 || currentTrackIndex >= loadedTracksData.length - 1;
+            
+            btnPrev.style.opacity = btnPrev.disabled ? "0.3" : "1";
+            btnNext.style.opacity = btnNext.disabled ? "0.3" : "1";
         }
 
         function buildLibrarySelector() {
@@ -288,30 +432,23 @@
             try {
                 const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(show.url)}`;
                 const response = await fetch(apiUrl);
-                
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                
                 const data = await response.json();
                 
                 if (data.status === 'ok' && data.items && data.items.length > 0) {
                     const firstItem = data.items[0];
-                    
                     const title = firstItem.title || show.name;
                     const audioUrl = firstItem.enclosure?.link; 
                     const pubDateStr = firstItem.pubDate || "";
-                    
                     const formattedDate = pubDateStr ? new Date(pubDateStr.replace(/-/g, '/')).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
 
                     if (audioUrl) {
                         return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl, time: formattedDate };
                     }
-                } else {
-                    console.warn(`Feed parsed but no audio found for ${show.name}`, data);
                 }
             } catch (e) {
                 console.error(`Error fetching feed for ${show.name}:`, e);
             }
-            
             return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable or tracking offline", audioUrl: null, time: "" };
         }
 
@@ -374,113 +511,11 @@
                 const firstValidIndex = loadedTracksData.findIndex(t => t.audioUrl !== null);
                 
                 if (firstValidIndex !== -1) {
-                    const playPromise = playIndex(firstValidIndex);
-                    
-                    if (playPromise !== undefined) {
-                        playPromise.catch(err => {
-                            console.warn("Browser blocked autoplay. Waiting for user interaction...");
-                            
-                            const startOnInteract = () => {
-                                audioPlayer.play();
-                                document.removeEventListener('click', startOnInteract);
-                            };
-                            
-                            document.addEventListener('click', startOnInteract);
-                        });
-                    }
+                    playIndex(firstValidIndex);
                 }
             }
-            
             updateNavigationButtons();
         }
-
-        function playIndex(index) {
-            if (index < 0 || index >= loadedTracksData.length) return;
-            currentTrackIndex = index;
-            preloadedIndex = -1; // Reset preloader tracking for the new track
-            const track = loadedTracksData[index];
-
-            if (!track.audioUrl) {
-                advanceQueueNext();
-                return;
-            }
-
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.metadata = new MediaMetadata({
-                    title: track.episodeTitle,
-                    artist: track.sourceName,
-                    album: 'My News Briefing'
-                });
-            }
-
-            audioPlayer.autoplay = true; 
-            audioPlayer.src = track.audioUrl;
-            audioPlayer.load(); 
-            
-            const playPromise = audioPlayer.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(err => console.log("Waiting on native autoplay."));
-            }
-
-            audioPlayerContainer.classList.remove('hidden');
-            nowPlayingSource.textContent = track.sourceName.toUpperCase();
-            nowPlayingTitle.textContent = track.episodeTitle;
-            nowPlayingDate.textContent = track.time;
-
-            if (document.visibilityState === 'visible') {
-                refreshPlaylistQueue({ fetchNewData: false });
-            }
-        }
-
-        function advanceQueueNext() {
-            const nextIndex = currentTrackIndex + 1;
-            
-            if (nextIndex < loadedTracksData.length) {
-                playIndex(nextIndex);
-            } else {
-                audioPlayer.pause();
-                audioPlayer.currentTime = 0; 
-            }
-        }
-
-        function advanceQueuePrev() {
-            if (currentTrackIndex > 0) {
-                playIndex(currentTrackIndex - 1);
-            }
-        }
-
-        function updateNavigationButtons() {
-            btnPrev.disabled = currentTrackIndex <= 0;
-            btnNext.disabled = currentTrackIndex === -1 || currentTrackIndex >= loadedTracksData.length - 1;
-            
-            btnPrev.style.opacity = btnPrev.disabled ? "0.3" : "1";
-            btnNext.style.opacity = btnNext.disabled ? "0.3" : "1";
-        }
-
-        // --- NETWORK WAKE-UP PING ---
-        // Exactly 15 seconds before the current track ends, this forces the phone's 
-        // network antenna to wake up and fetch the next track, beating the Deep Doze timeout.
-        audioPlayer.addEventListener('timeupdate', () => {
-            if (audioPlayer.duration && (audioPlayer.duration - audioPlayer.currentTime < 15)) {
-                const nextIndex = currentTrackIndex + 1;
-                // Only trigger the network ping once per track
-                if (nextIndex < loadedTracksData.length && preloadedIndex !== nextIndex) {
-                    preloadedIndex = nextIndex;
-                    const nextTrack = loadedTracksData[nextIndex];
-                    if (nextTrack && nextTrack.audioUrl) {
-                        preloadAudio.src = nextTrack.audioUrl;
-                        preloadAudio.load(); 
-                    }
-                }
-            }
-        });
-
-        audioPlayer.addEventListener('error', (e) => {
-            console.warn("Track failed to load, skipping...", e);
-            advanceQueueNext();
-        });
-        
-        audioPlayer.addEventListener('ended', advanceQueueNext);
 
         initApp();
     </script>
