@@ -67,8 +67,7 @@
                 </button>
             </div>
 
-            <!-- Single clean media player -->
-            <audio id="main-audio-player" controls playsinline class="w-full h-8 mt-1"></audio>
+            <audio id="main-audio-player" controls class="w-full h-8 mt-1"></audio>
         </div>
     </footer>
 
@@ -107,6 +106,27 @@
                     { id: "techcrunch", name: "The TechCrunch Podcast", url: "https://feeds.megaphone.fm/techcrunch-podcast" },
                     { id: "cnet_news", name: "CNET News", url: "https://feeds.feedburner.com/cnet/podcast-news" }
                 ]
+            },
+            {
+                category: "Global & Specialty Perspectives",
+                shows: [
+                    { id: "bbc_global", name: "BBC World Service Global News", url: "https://podcasts.files.bbci.co.uk/p02nq0gn.rss" },
+                    { id: "bbc_minute", name: "BBC Minute", url: "https://podcasts.files.bbci.co.uk/p035w97g.rss" },
+                    { id: "reuters_world", name: "Reuters World News Digest", url: "https://feeds.audiomeans.fr/s/p/reuters-world-news-digest" },
+                    { id: "reuters_biz", name: "Reuters Business Briefing", url: "https://feeds.audiomeans.fr/s/p/reuters-business-briefing" },
+                    { id: "economist_radio", name: "The Economist Radio", url: "https://feeds.acast.com/public/shows/06757b1c-99d7-5509-b68b-59d8fa7da85f" },
+                    { id: "pbs_hour", name: "PBS NewsHour Full Show Audio", url: "https://feeds.feedburner.com/pbsnewshour-full-audio" }
+                ]
+            },
+            {
+                category: "Sports & Entertainment",
+                shows: [
+                    { id: "espn_flash", name: "ESPN SportsCenter Flash", url: "https://feeds.megaphone.fm/ESP4170327170" },
+                    { id: "cbs_sports", name: "CBS Sports Minute", url: "https://feeds.megaphone.fm/cbssportsminute" },
+                    { id: "nbc_pft", name: "NBC Sports Pro Football Talk", url: "https://feeds.megaphone.fm/profootballtalk" },
+                    { id: "thr_news", name: "The Hollywood Reporter News", url: "https://feeds.megaphone.fm/thr-news" },
+                    { id: "billboard", name: "Billboard News", url: "https://feeds.megaphone.fm/billboard-news" }
+                ]
             }
         ];
 
@@ -126,6 +146,11 @@
         const btnRw10 = document.getElementById('btn-rw10');
         const btnFf10 = document.getElementById('btn-ff10');
 
+        // --- RESTORED: THE SILENT HEARTBEAT ---
+        const silentHeartbeat = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
+        silentHeartbeat.loop = true;
+        silentHeartbeat.volume = 0.01;
+
         let activeQueueOrder = ['npr_now', 'cnn_5', 'wsj_whats'];
         try {
             const savedOrder = localStorage.getItem('newsQueueOrder');
@@ -144,42 +169,31 @@
         let loadedTracksData = []; 
         let currentTrackIndex = -1;
 
-        // --- IN-MEMORY BLOB AUDIO ENGINE ---
-        // Downloads the next track directly into the phone's RAM to bypass deep sleep network kills
-        const blobCache = {};
-
-        function cleanUpOldBlob(index) {
-            if (blobCache[index]) {
-                URL.revokeObjectURL(blobCache[index]);
-                delete blobCache[index];
+        // Clean user play/pause functions that explicitly sync lock-screen state
+        function handleUserPlay() {
+            silentHeartbeat.play().catch(() => {});
+            audioPlayer.play().catch(e => console.log(e));
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'playing';
             }
         }
 
-        async function preloadTrackBlob(index) {
-            const track = loadedTracksData[index];
-            if (!track || !track.audioUrl || blobCache[index]) return;
-
-            try {
-                // Attempt to download the MP3 directly into memory
-                const response = await fetch(track.audioUrl);
-                if (!response.ok) throw new Error("Fetch failed");
-                const blob = await response.blob();
-                blobCache[index] = URL.createObjectURL(blob);
-            } catch (err) {
-                try {
-                    // Fallback to CORS proxy if the podcast host blocks direct background fetching
-                    const response = await fetch("https://corsproxy.io/?" + encodeURIComponent(track.audioUrl));
-                    if (!response.ok) throw new Error("Proxy failed");
-                    const blob = await response.blob();
-                    blobCache[index] = URL.createObjectURL(blob);
-                } catch (proxyErr) {
-                    console.log("Preload failed. Falling back to standard streaming for track", index);
-                }
+        function handleUserPause() {
+            audioPlayer.pause();
+            silentHeartbeat.pause();
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused';
             }
         }
-        // -----------------------------------
 
         function initApp() {
+            // Wake up heartbeat on the user's first tap
+            const startHeartbeat = () => {
+                silentHeartbeat.play().catch(() => {});
+                document.removeEventListener('click', startHeartbeat);
+            };
+            document.addEventListener('click', startHeartbeat);
+
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'visible' && loadedTracksData.length > 0) {
                     refreshPlaylistQueue({ fetchNewData: false });
@@ -197,9 +211,10 @@
             btnPrev.addEventListener('click', advanceQueuePrev);
             btnNext.addEventListener('click', advanceQueueNext);
 
+            // Explicit lock-screen controls that keep both audio and heartbeat in sync
             if ('mediaSession' in navigator) {
-                navigator.mediaSession.setActionHandler('play', () => audioPlayer.play());
-                navigator.mediaSession.setActionHandler('pause', () => audioPlayer.pause());
+                navigator.mediaSession.setActionHandler('play', handleUserPlay);
+                navigator.mediaSession.setActionHandler('pause', handleUserPause);
                 navigator.mediaSession.setActionHandler('previoustrack', advanceQueuePrev);
                 navigator.mediaSession.setActionHandler('nexttrack', advanceQueueNext);
                 navigator.mediaSession.setActionHandler('seekbackward', () => {
@@ -367,28 +382,23 @@
                 if (firstValidIndex !== -1) {
                     playIndex(firstValidIndex);
                 }
-            } else if (options.fetchNewData && loadedTracksData.length > 0) {
-                // If not autoplaying, silently preload the first track into memory right now
-                const firstValidIndex = loadedTracksData.findIndex(t => t.audioUrl !== null);
-                if (firstValidIndex !== -1) preloadTrackBlob(firstValidIndex);
             }
             updateNavigationButtons();
         }
 
         function playIndex(index) {
             if (index < 0 || index >= loadedTracksData.length) return;
-            
-            // Clean up the RAM from the track that just finished playing
-            if (currentTrackIndex !== -1 && currentTrackIndex !== index) {
-                cleanUpOldBlob(currentTrackIndex);
-            }
-            
             currentTrackIndex = index;
             const track = loadedTracksData[index];
 
             if (!track.audioUrl) {
                 advanceQueueNext();
                 return;
+            }
+
+            // Keep the heartbeat looping continuously across track transitions
+            if (silentHeartbeat.paused) {
+                silentHeartbeat.play().catch(() => {});
             }
 
             if ('mediaSession' in navigator) {
@@ -400,17 +410,8 @@
                 navigator.mediaSession.playbackState = 'playing';
             }
 
-            audioPlayer.autoplay = true;
-
-            // PLAY INSTANTLY FROM DEVICE RAM IF PRELOADED, OTHERWISE FALLBACK TO STREAM
-            if (blobCache[index]) {
-                audioPlayer.src = blobCache[index];
-            } else {
-                audioPlayer.src = track.audioUrl;
-            }
-            
-            audioPlayer.load(); 
-            audioPlayer.play().catch(err => console.log("Waiting on interaction"));
+            audioPlayer.src = track.audioUrl;
+            audioPlayer.play().catch(err => console.log("Waiting on interaction:", err));
 
             audioPlayerContainer.classList.remove('hidden');
             nowPlayingSource.textContent = track.sourceName.toUpperCase();
@@ -421,9 +422,6 @@
                 refreshPlaylistQueue({ fetchNewData: false });
             }
             updateNavigationButtons();
-
-            // KICK OFF PRELOAD FOR THE NEXT TRACK WHILE THIS ONE PLAYS
-            preloadTrackBlob(index + 1);
         }
 
         function advanceQueueNext() {
@@ -433,6 +431,11 @@
             } else {
                 audioPlayer.pause();
                 audioPlayer.currentTime = 0;
+                // Only stop the heartbeat when the entire playlist has completed
+                silentHeartbeat.pause();
+                if ('mediaSession' in navigator) {
+                    navigator.mediaSession.playbackState = 'none';
+                }
             }
         }
 
@@ -447,18 +450,12 @@
             btnNext.style.opacity = btnNext.disabled ? "0.3" : "1";
         }
 
+        // Standard listeners only: NO generic 'pause' listener that could kill the heartbeat
         audioPlayer.addEventListener('error', (e) => {
             console.warn("Track failed to load, skipping...", e);
             advanceQueueNext();
         });
         audioPlayer.addEventListener('ended', advanceQueueNext);
-
-        audioPlayer.addEventListener('pause', () => {
-            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
-        });
-        audioPlayer.addEventListener('play', () => {
-            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-        });
 
         initApp();
     </script>
