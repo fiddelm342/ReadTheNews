@@ -68,7 +68,6 @@
             </div>
 
             <audio id="main-audio-player" controls class="w-full h-8 mt-1"></audio>
-            <audio id="preload-audio" preload="auto" class="hidden"></audio>
         </div>
     </footer>
 
@@ -131,16 +130,7 @@
             }
         ];
 
-        const SHOW_LOOKUP = {};
-        FULL_LIBRARY.forEach(cat => cat.shows.forEach(s => SHOW_LOOKUP[s.id] = s));
-
-        const libraryContainer = document.getElementById('library-container');
-        const queueContainer = document.getElementById('playlist-queue');
-        const autoplayToggle = document.getElementById('autoplay-toggle');
-        const audioPlayerContainer = document.getElementById('audio-player-container');
-// Change these two lines from 'const' to 'let'
         const audioPlayer = document.getElementById('main-audio-player');
-        const preloadAudio = document.getElementById('preload-audio');
         const nowPlayingSource = document.getElementById('now-playing-source');
         const nowPlayingTitle = document.getElementById('now-playing-title');
         const nowPlayingDate = document.getElementById('now-playing-date');
@@ -155,36 +145,6 @@
         
         let loadedTracksData = []; 
         let currentTrackIndex = -1;
-        let wakeLockCtx = null;
-
-        // Plays an imperceptible silent loop to keep the mobile OS awake
-        function enableBackgroundWakeLock() {
-            if (wakeLockCtx) {
-                if (wakeLockCtx.state === 'suspended') wakeLockCtx.resume();
-                return;
-            }
-            try {
-                wakeLockCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const oscillator = wakeLockCtx.createOscillator();
-                const gainNode = wakeLockCtx.createGain();
-                
-                oscillator.frequency.value = 1; // 1Hz (inaudible)
-                gainNode.gain.value = 0.001; // Near-zero volume
-                
-                oscillator.connect(gainNode);
-                gainNode.connect(wakeLockCtx.destination);
-                oscillator.start();
-
-                // If created before the user taps the screen, wait for any tap to start it
-                const resumeOnInteract = () => {
-                    if (wakeLockCtx.state === 'suspended') wakeLockCtx.resume();
-                    document.removeEventListener('click', resumeOnInteract);
-                }
-                document.addEventListener('click', resumeOnInteract);
-            } catch (e) {
-                console.log("AudioContext Wake Lock failed", e);
-            }
-        }
 
         function initApp() {
             // Refresh the UI highlight when waking the phone up
@@ -205,17 +165,17 @@
             btnNext.addEventListener('click', advanceQueueNext);
 
             if ('mediaSession' in navigator) {
-            navigator.mediaSession.setActionHandler('play', () => audioPlayer.play());
-            navigator.mediaSession.setActionHandler('pause', () => audioPlayer.pause());
-            navigator.mediaSession.setActionHandler('previoustrack', advanceQueuePrev);
-            navigator.mediaSession.setActionHandler('nexttrack', advanceQueueNext);
-            navigator.mediaSession.setActionHandler('seekbackward', () => {
-            audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10);
-        });
-        navigator.mediaSession.setActionHandler('seekforward', () => {
-            audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + 10);
-        });
-    }
+                navigator.mediaSession.setActionHandler('play', () => audioPlayer.play());
+                navigator.mediaSession.setActionHandler('pause', () => audioPlayer.pause());
+                navigator.mediaSession.setActionHandler('previoustrack', advanceQueuePrev);
+                navigator.mediaSession.setActionHandler('nexttrack', advanceQueueNext);
+                navigator.mediaSession.setActionHandler('seekbackward', () => {
+                    audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10);
+                });
+                navigator.mediaSession.setActionHandler('seekforward', () => {
+                    audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + 10);
+                });
+            }
 
             buildLibrarySelector();
             initSortableEngine();
@@ -250,39 +210,34 @@
         }
 
         function initSortableEngine() {
-    Sortable.create(queueContainer, {
-        animation: 150,
-        handle: '.drag-handle',
-        onEnd: () => {
-            // 1. Remember the ID of the currently playing track
-            let currentPlayingId = null;
-            if (currentTrackIndex >= 0 && currentTrackIndex < loadedTracksData.length) {
-                currentPlayingId = loadedTracksData[currentTrackIndex].id;
-            }
+            Sortable.create(queueContainer, {
+                animation: 150,
+                handle: '.drag-handle',
+                onEnd: () => {
+                    let currentPlayingId = null;
+                    if (currentTrackIndex >= 0 && currentTrackIndex < loadedTracksData.length) {
+                        currentPlayingId = loadedTracksData[currentTrackIndex].id;
+                    }
 
-            // 2. Read the new visual order and save it
-            const currentCards = queueContainer.querySelectorAll('[data-queue-id]');
-            activeQueueOrder = Array.from(currentCards).map(card => card.getAttribute('data-queue-id'));
-            localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
-            
-            // 3. Reorder the background data array
-            loadedTracksData.sort((a, b) => {
-                return activeQueueOrder.indexOf(a.id) - activeQueueOrder.indexOf(b.id);
+                    const currentCards = queueContainer.querySelectorAll('[data-queue-id]');
+                    activeQueueOrder = Array.from(currentCards).map(card => card.getAttribute('data-queue-id'));
+                    localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
+                    
+                    loadedTracksData.sort((a, b) => {
+                        return activeQueueOrder.indexOf(a.id) - activeQueueOrder.indexOf(b.id);
+                    });
+
+                    if (currentPlayingId) {
+                        currentTrackIndex = loadedTracksData.findIndex(t => t.id === currentPlayingId);
+                    }
+
+                    setTimeout(() => {
+                        refreshPlaylistQueue({ fetchNewData: false }); 
+                    }, 50);
+                }
             });
-
-            // 4. Update the playing index
-            if (currentPlayingId) {
-                currentTrackIndex = loadedTracksData.findIndex(t => t.id === currentPlayingId);
-            }
-
-            // 5. Use setTimeout to break the synchronous chain so SortableJS can 
-            // finish its internal cleanup before we overwrite the DOM.
-            setTimeout(() => {
-                refreshPlaylistQueue({ fetchNewData: false }); 
-            }, 50);
         }
-    });
-}
+
         function toggleShowSelection(e) {
             const id = e.target.getAttribute('data-id');
             if (e.target.checked) {
@@ -295,180 +250,164 @@
         }
 
         async function fetchFeedItem(showId) {
-    const show = SHOW_LOOKUP[showId];
-    if (!show) return null;
+            const show = SHOW_LOOKUP[showId];
+            if (!show) return null;
 
-    try {
-        // Use rss2json to handle both CORS and the XML parsing server-side
-        const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(show.url)}`;
-        const response = await fetch(apiUrl);
-        
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        
-        const data = await response.json();
-        
-        // rss2json returns a 'status' field we can check
-        if (data.status === 'ok' && data.items && data.items.length > 0) {
-            const firstItem = data.items[0];
-            
-            const title = firstItem.title || show.name;
-            // The audio file is extracted into the 'enclosure' object
-            const audioUrl = firstItem.enclosure?.link; 
-            const pubDateStr = firstItem.pubDate || "";
-            
-            const formattedDate = pubDateStr ? new Date(pubDateStr.replace(/-/g, '/')).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
+            try {
+                const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(show.url)}`;
+                const response = await fetch(apiUrl);
+                
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                const data = await response.json();
+                
+                if (data.status === 'ok' && data.items && data.items.length > 0) {
+                    const firstItem = data.items[0];
+                    
+                    const title = firstItem.title || show.name;
+                    const audioUrl = firstItem.enclosure?.link; 
+                    const pubDateStr = firstItem.pubDate || "";
+                    
+                    const formattedDate = pubDateStr ? new Date(pubDateStr.replace(/-/g, '/')).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
 
-            if (audioUrl) {
-                return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl, time: formattedDate };
+                    if (audioUrl) {
+                        return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl, time: formattedDate };
+                    }
+                } else {
+                    console.warn(`Feed parsed but no audio found for ${show.name}`, data);
+                }
+            } catch (e) {
+                console.error(`Error fetching feed for ${show.name}:`, e);
             }
-        } else {
-            console.warn(`Feed parsed but no audio found for ${show.name}`, data);
-        }
-    } catch (e) {
-        console.error(`Error fetching feed for ${show.name}:`, e);
-    }
-    
-    return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable or tracking offline", audioUrl: null, time: "" };
-}
-
-async function refreshPlaylistQueue(options = { fetchNewData: true }) {
-    if (activeQueueOrder.length === 0) {
-        queueContainer.innerHTML = '<p class="text-slate-400 text-xs italic text-center py-4">Your queue is empty. Choose sources down below.</p>';
-        audioPlayerContainer.classList.add('hidden');
-        return;
-    }
-
-    if (options.fetchNewData) {
-        queueContainer.innerHTML = '<p class="text-blue-600 text-xs animate-pulse text-center py-4">Validating RSS endpoints & loading latest tracks...</p>';
-        
-        const tracks = [];
-        for (const showId of activeQueueOrder) {
-            const t = await fetchFeedItem(showId);
-            if (t) tracks.push(t);
-        }
-        loadedTracksData = tracks;
-    }
-
-    queueContainer.innerHTML = '';
-
-    loadedTracksData.forEach((track, index) => {
-        const isPlayable = track.audioUrl !== null;
-        const card = document.createElement('div');
-        card.setAttribute('data-queue-id', track.id);
-        card.className = `bg-white p-2.5 rounded-lg border shadow-sm flex items-center space-x-3 transition ${index === currentTrackIndex ? 'border-blue-500 bg-blue-50/40' : 'border-slate-200'}`;
-        
-        card.innerHTML = `
-            <div class="drag-handle text-slate-400 cursor-grab active:cursor-grabbing p-1">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 8h16M4 16h16"></path></svg>
-            </div>
-            <div class="truncate flex-1">
-                <div class="flex items-center space-x-1.5">
-                    <span class="text-[10px] text-white bg-slate-400 rounded-full w-4 h-4 flex items-center justify-center font-bold font-mono shrink-0">${index + 1}</span>
-                    <h3 class="font-bold text-slate-900 text-xs truncate">${track.sourceName}</h3>
-                </div>
-                <p class="text-[11px] text-slate-500 truncate ml-5.5">${track.episodeTitle}</p>
-            </div>
-            <div class="shrink-0 flex items-center space-x-2 text-right">
-                <span class="text-[9px] text-slate-400 font-medium">${track.time}</span>
-                <button ${!isPlayable ? 'disabled' : ''} class="play-btn bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 text-white rounded-full p-1.5 shadow-sm transition">
-                    <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                </button>
-            </div>
-        `;
-
-        if (isPlayable) {
-            card.querySelector('.play-btn').addEventListener('click', (e) => {
-                e.stopPropagation();
-                playIndex(index);
-            });
-        }
-        queueContainer.appendChild(card);
-    });
-
-    if (options.fetchNewData && autoplayEnabled && loadedTracksData.length > 0) {
-        autoplayEnabled = false; 
-        const firstValidIndex = loadedTracksData.findIndex(t => t.audioUrl !== null);
-        
-        if (firstValidIndex !== -1) {
-            const playPromise = playIndex(firstValidIndex);
             
-            // If the browser blocks autoplay, queue it up for the user's first click
-            if (playPromise !== undefined) {
-                playPromise.catch(err => {
-                    console.warn("Browser blocked autoplay. Waiting for user interaction...");
+            return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable or tracking offline", audioUrl: null, time: "" };
+        }
+
+        async function refreshPlaylistQueue(options = { fetchNewData: true }) {
+            if (activeQueueOrder.length === 0) {
+                queueContainer.innerHTML = '<p class="text-slate-400 text-xs italic text-center py-4">Your queue is empty. Choose sources down below.</p>';
+                audioPlayerContainer.classList.add('hidden');
+                return;
+            }
+
+            if (options.fetchNewData) {
+                queueContainer.innerHTML = '<p class="text-blue-600 text-xs animate-pulse text-center py-4">Validating RSS endpoints & loading latest tracks...</p>';
+                
+                const tracks = [];
+                for (const showId of activeQueueOrder) {
+                    const t = await fetchFeedItem(showId);
+                    if (t) tracks.push(t);
+                }
+                loadedTracksData = tracks;
+            }
+
+            queueContainer.innerHTML = '';
+
+            loadedTracksData.forEach((track, index) => {
+                const isPlayable = track.audioUrl !== null;
+                const card = document.createElement('div');
+                card.setAttribute('data-queue-id', track.id);
+                card.className = `bg-white p-2.5 rounded-lg border shadow-sm flex items-center space-x-3 transition ${index === currentTrackIndex ? 'border-blue-500 bg-blue-50/40' : 'border-slate-200'}`;
+                
+                card.innerHTML = `
+                    <div class="drag-handle text-slate-400 cursor-grab active:cursor-grabbing p-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 8h16M4 16h16"></path></svg>
+                    </div>
+                    <div class="truncate flex-1">
+                        <div class="flex items-center space-x-1.5">
+                            <span class="text-[10px] text-white bg-slate-400 rounded-full w-4 h-4 flex items-center justify-center font-bold font-mono shrink-0">${index + 1}</span>
+                            <h3 class="font-bold text-slate-900 text-xs truncate">${track.sourceName}</h3>
+                        </div>
+                        <p class="text-[11px] text-slate-500 truncate ml-5.5">${track.episodeTitle}</p>
+                    </div>
+                    <div class="shrink-0 flex items-center space-x-2 text-right">
+                        <span class="text-[9px] text-slate-400 font-medium">${track.time}</span>
+                        <button ${!isPlayable ? 'disabled' : ''} class="play-btn bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 text-white rounded-full p-1.5 shadow-sm transition">
+                            <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                        </button>
+                    </div>
+                `;
+
+                if (isPlayable) {
+                    card.querySelector('.play-btn').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        playIndex(index);
+                    });
+                }
+                queueContainer.appendChild(card);
+            });
+
+            if (options.fetchNewData && autoplayEnabled && loadedTracksData.length > 0) {
+                autoplayEnabled = false; 
+                const firstValidIndex = loadedTracksData.findIndex(t => t.audioUrl !== null);
+                
+                if (firstValidIndex !== -1) {
+                    const playPromise = playIndex(firstValidIndex);
                     
-                    const startOnInteract = () => {
-                        audioPlayer.play();
-                        // Remove the listener once it plays so it doesn't fire on every click
-                        document.removeEventListener('click', startOnInteract);
-                    };
-                    
-                    // Listen for the first click anywhere on the document
-                    document.addEventListener('click', startOnInteract);
+                    if (playPromise !== undefined) {
+                        playPromise.catch(err => {
+                            console.warn("Browser blocked autoplay. Waiting for user interaction...");
+                            
+                            const startOnInteract = () => {
+                                audioPlayer.play();
+                                document.removeEventListener('click', startOnInteract);
+                            };
+                            
+                            document.addEventListener('click', startOnInteract);
+                        });
+                    }
+                }
+            }
+            
+            updateNavigationButtons();
+        }
+
+        function playIndex(index) {
+            if (index < 0 || index >= loadedTracksData.length) return;
+            currentTrackIndex = index;
+            const track = loadedTracksData[index];
+
+            if (!track.audioUrl) {
+                advanceQueueNext();
+                return;
+            }
+
+            // 1. SET METADATA FIRST
+            // This immediately informs the OS that a continuous media session is proceeding,
+            // locking the background privileges BEFORE the network request causes a delay.
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: track.episodeTitle,
+                    artist: track.sourceName,
+                    album: 'My News Briefing',
+                    artwork: [
+                        { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+                        { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }
+                    ]
                 });
             }
+
+            // 2. SYNCHRONOUSLY SWAP AND PLAY (NO PAUSE COMMAND)
+            // By NOT calling audioPlayer.pause(), the OS safely transitions the media element
+            audioPlayer.autoplay = true; 
+            audioPlayer.src = track.audioUrl;
+            audioPlayer.load(); 
+            
+            const playPromise = audioPlayer.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(err => console.log("Waiting on native autoplay."));
+            }
+
+            // 3. UPDATE VISUAL UI
+            audioPlayerContainer.classList.remove('hidden');
+            nowPlayingSource.textContent = track.sourceName.toUpperCase();
+            nowPlayingTitle.textContent = track.episodeTitle;
+            nowPlayingDate.textContent = track.time;
+
+            if (document.visibilityState === 'visible') {
+                refreshPlaylistQueue({ fetchNewData: false });
+            }
         }
-    }
-    
-    updateNavigationButtons();
-}
-
-function playIndex(index) {
-    if (index < 0 || index >= loadedTracksData.length) return;
-    currentTrackIndex = index;
-    const track = loadedTracksData[index];
-
-    if (!track.audioUrl) {
-        advanceQueueNext();
-        return;
-    }
-
-    // 1. Activate Wake Lock & stop any overlapping audio
-    enableBackgroundWakeLock();
-    audioPlayer.pause(); 
-    preloadAudio.pause(); 
-
-    // 2. Play the main track
-    audioPlayer.autoplay = true; 
-    audioPlayer.src = track.audioUrl;
-    audioPlayer.load(); 
-    
-    const playPromise = audioPlayer.play();
-    if (playPromise !== undefined) {
-        playPromise.catch(err => console.log("Waiting on native autoplay."));
-    }
-
-    // 3. Silently fetch the next track into cache
-    const nextIndex = currentTrackIndex + 1;
-    if (nextIndex < loadedTracksData.length) {
-        const nextTrack = loadedTracksData[nextIndex];
-        if (nextTrack && nextTrack.audioUrl) {
-            preloadAudio.src = nextTrack.audioUrl;
-        }
-    }
-
-    // 4. Update UI & Lock Screen
-    audioPlayerContainer.classList.remove('hidden');
-    nowPlayingSource.textContent = track.sourceName.toUpperCase();
-    nowPlayingTitle.textContent = track.episodeTitle;
-    nowPlayingDate.textContent = track.time;
-
-    if ('mediaSession' in navigator) {
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: track.episodeTitle,
-            artist: track.sourceName,
-            album: 'My News Briefing',
-            artwork: [
-                { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
-                { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }
-            ]
-        });
-    }
-
-    if (document.visibilityState === 'visible') {
-        refreshPlaylistQueue({ fetchNewData: false });
-    }
-}
         
 function advanceQueueNext() {
     const nextIndex = currentTrackIndex + 1;
