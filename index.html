@@ -322,66 +322,77 @@ async function fetchFeedItem(showId) {
             const show = SHOW_LOOKUP[showId];
             if (!show) return null;
 
+            // Helper function to safely parse and convert dates across different API formats
+            const parseDate = (pubDateStr, isUtcAssumed) => {
+                if (!pubDateStr) return "";
+                let dateStr = pubDateStr.replace(/-/g, '/');
+                if (isUtcAssumed && !dateStr.includes('UTC') && !dateStr.includes('+')) {
+                    dateStr += ' UTC';
+                }
+                return new Date(dateStr).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            };
+
             try {
-                // First try the standard rss2json API
-                const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(show.url)}`;
-                const response = await fetch(apiUrl);
+                // TRY 1: The standard rss2json API
+                const response = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(show.url)}`);
                 const data = await response.json();
                 
                 if (data.status === 'ok' && data.items && data.items.length > 0) {
-                    const firstItem = data.items[0];
-                    const title = firstItem.title || show.name;
-                    const audioUrl = firstItem.enclosure?.link; 
-                    const pubDateStr = firstItem.pubDate || "";
-                    const formattedDate = pubDateStr ? new Date(pubDateStr.replace(/-/g, '/') + ' UTC').toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
-
-                    if (audioUrl) {
-                        return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl, time: formattedDate };
+                    const item = data.items[0];
+                    if (item.enclosure?.link) {
+                        return { id: showId, sourceName: show.name, episodeTitle: item.title || show.name, audioUrl: item.enclosure.link, time: parseDate(item.pubDate, true) };
                     }
-                } else {
-                    throw new Error("API returned an error or empty feed");
                 }
-            } catch (e) {
-                console.log(`API failed for ${show.name}, trying raw XML via CodeTabs proxy...`);
+                throw new Error("RSS2JSON failed or blocked");
+            } catch (e1) {
+                console.log(`rss2json blocked for ${show.name}, trying Factmaven API...`);
                 
-                // FALLBACK: Use the stealthier CodeTabs proxy to bypass Cloudflare
                 try {
-                    const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(show.url)}`;
-                    const xmlResponse = await fetch(proxyUrl);
-                    if (!xmlResponse.ok) throw new Error("CodeTabs proxy fetch failed");
+                    // TRY 2: Factmaven API (A secondary, stealthier RSS-to-JSON service)
+                    const res2 = await fetch(`https://api.factmaven.com/xml-to-json/?xml=${encodeURIComponent(show.url)}`);
+                    const data2 = await res2.json();
                     
-                    const text = await xmlResponse.text();
-                    const parser = new DOMParser();
-                    const xmlDoc = parser.parseFromString(text, "text/xml");
-                    
-                    const item = xmlDoc.querySelector("item");
-                    if (item) {
-                        const title = item.querySelector("title")?.textContent || show.name;
-                        
-                        // Look for the standard enclosure tag first
-                        let enclosure = item.querySelector("enclosure");
-                        let audioUrl = enclosure ? enclosure.getAttribute("url") : null;
-                        
-                        // Fallback check for media:content if enclosure is missing
-                        if (!audioUrl) {
-                            const mediaContent = item.querySelector("content, [nodeName='media:content']");
-                            if (mediaContent) audioUrl = mediaContent.getAttribute("url");
-                        }
-
-                        const pubDateStr = item.querySelector("pubDate")?.textContent || "";
-                        const formattedDate = pubDateStr ? new Date(pubDateStr).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
-
+                    const item = data2?.rss?.channel?.item?.[0] || data2?.rss?.channel?.item;
+                    if (item && item.enclosure) {
+                        const audioUrl = item.enclosure.url || item.enclosure['@attributes']?.url;
                         if (audioUrl) {
-                            return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl, time: formattedDate };
+                            return { id: showId, sourceName: show.name, episodeTitle: item.title || show.name, audioUrl: audioUrl, time: parseDate(item.pubDate, false) };
                         }
                     }
-                } catch (fallbackError) {
-                    console.error(`Native XML fallback failed for ${show.name}:`, fallbackError);
+                    throw new Error("Factmaven failed or blocked");
+                } catch (e2) {
+                    console.log(`Factmaven blocked for ${show.name}, trying AllOrigins wrapper...`);
+                    
+                    try {
+                        // TRY 3: AllOrigins /get wrapper (Wraps data in JSON to prevent CORS crashes)
+                        const res3 = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(show.url)}`);
+                        const data3 = await res3.json();
+                        
+                        // Check if we got XML, and ensure it isn't a Cloudflare Captcha page
+                        if (data3.contents && !data3.contents.includes("<title>Just a moment...</title>")) {
+                            const parser = new DOMParser();
+                            const xmlDoc = parser.parseFromString(data3.contents, "text/xml");
+                            const item = xmlDoc.querySelector("item");
+                            
+                            if (item) {
+                                let audioUrl = item.querySelector("enclosure")?.getAttribute("url") || 
+                                               item.querySelector("content, [nodeName='media:content']")?.getAttribute("url");
+                                if (audioUrl) {
+                                    const title = item.querySelector("title")?.textContent || show.name;
+                                    const pubDate = item.querySelector("pubDate")?.textContent || "";
+                                    return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl: audioUrl, time: parseDate(pubDate, false) };
+                                }
+                            }
+                        }
+                    } catch (e3) {
+                        console.error(`All fallbacks totally blocked for ${show.name}`);
+                    }
                 }
             }
-            return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable", audioUrl: null, time: "" };
-        }
-        
+            
+            // If all 3 APIs are blocked by Cloudflare, gracefully show this instead of crashing the UI
+            return { id: showId, sourceName: show.name, episodeTitle: "Feed temporarily blocked by publisher firewall", audioUrl: null, time: "" };
+        }        
         async function refreshPlaylistQueue(options = { fetchNewData: true }) {
             if (activeQueueOrder.length === 0) {
                 queueContainer.innerHTML = '<p class="text-slate-400 text-xs italic text-center py-4">Your queue is empty.</p>';
