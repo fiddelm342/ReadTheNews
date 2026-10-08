@@ -317,14 +317,14 @@
             refreshPlaylistQueue();
         }
 
-        async function fetchFeedItem(showId) {
+async function fetchFeedItem(showId) {
             const show = SHOW_LOOKUP[showId];
             if (!show) return null;
 
             try {
+                // First try the standard rss2json API
                 const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(show.url)}`;
                 const response = await fetch(apiUrl);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 const data = await response.json();
                 
                 if (data.status === 'ok' && data.items && data.items.length > 0) {
@@ -332,18 +332,46 @@
                     const title = firstItem.title || show.name;
                     const audioUrl = firstItem.enclosure?.link; 
                     const pubDateStr = firstItem.pubDate || "";
-                    const formattedDate = pubDateStr ? new Date(pubDateStr.replace(/-/g, '/')).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
+                    const formattedDate = pubDateStr ? new Date(pubDateStr.replace(/-/g, '/') + ' UTC').toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
 
                     if (audioUrl) {
                         return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl, time: formattedDate };
                     }
+                } else {
+                    throw new Error("API returned an error or empty feed");
                 }
             } catch (e) {
-                console.error(`Error fetching feed for ${show.name}:`, e);
+                console.log(`API failed for ${show.name}, falling back to native XML parsing...`);
+                
+                // FALLBACK: Fetch the raw XML directly and parse it in the browser
+                try {
+                    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(show.url)}`;
+                    const xmlResponse = await fetch(proxyUrl);
+                    if (!xmlResponse.ok) throw new Error("Proxy fetch failed");
+                    
+                    const text = await xmlResponse.text();
+                    const parser = new DOMParser();
+                    const xmlDoc = parser.parseFromString(text, "text/xml");
+                    
+                    const item = xmlDoc.querySelector("item");
+                    if (item) {
+                        const title = item.querySelector("title")?.textContent || show.name;
+                        const enclosure = item.querySelector("enclosure");
+                        const audioUrl = enclosure ? enclosure.getAttribute("url") : null;
+                        const pubDateStr = item.querySelector("pubDate")?.textContent || "";
+                        // Standard XML pubDates usually include timezone offsets, so we let the Date object handle it natively
+                        const formattedDate = pubDateStr ? new Date(pubDateStr).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
+
+                        if (audioUrl) {
+                            return { id: showId, sourceName: show.name, episodeTitle: title, audioUrl, time: formattedDate };
+                        }
+                    }
+                } catch (fallbackError) {
+                    console.error(`Native XML fallback failed for ${show.name}:`, fallbackError);
+                }
             }
             return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable", audioUrl: null, time: "" };
         }
-
         async function refreshPlaylistQueue(options = { fetchNewData: true }) {
             if (activeQueueOrder.length === 0) {
                 queueContainer.innerHTML = '<p class="text-slate-400 text-xs italic text-center py-4">Your queue is empty.</p>';
