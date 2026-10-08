@@ -38,6 +38,23 @@
             <h2 class="text-md font-semibold mb-4 text-slate-600 uppercase tracking-wider text-xs border-b pb-2">Toggle & Choose Library</h2>
             <div id="library-container" class="space-y-6"></div>
         </section>
+
+        <!-- Personal Feed Input Form -->
+        <section class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mt-4 mb-24">
+            <h2 class="text-md font-semibold mb-4 text-slate-600 uppercase tracking-wider text-xs border-b pb-2">Add Personal RSS Feed</h2>
+            <div class="space-y-3">
+                <input type="text" id="custom-feed-name" placeholder="Podcast Name (e.g. My Favorite Show)" 
+                    class="w-full bg-slate-50 text-slate-900 placeholder-slate-400 text-sm rounded-lg px-3 py-2 border border-slate-300 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                
+                <input type="url" id="custom-feed-url" placeholder="RSS URL (e.g. https://feeds...)" 
+                    class="w-full bg-slate-50 text-slate-900 placeholder-slate-400 text-sm rounded-lg px-3 py-2 border border-slate-300 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                
+                <button onclick="saveCustomFeed()" 
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition shadow-sm">
+                    + Save to My Feeds
+                </button>
+            </div>
+        </section>
     </main>
 
     <footer id="audio-player-container" class="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 shadow-xl hidden z-50">
@@ -520,6 +537,39 @@ async function fetchFeedItem(showId) {
             btnPrev.style.opacity = btnPrev.disabled ? "0.3" : "1";
             btnNext.style.opacity = btnNext.disabled ? "0.3" : "1";
         }
+
+        function saveCustomFeed() {
+    const nameInput = document.getElementById('custom-feed-name');
+    const urlInput = document.getElementById('custom-feed-url');
+    
+    const name = nameInput.value.trim();
+    const url = urlInput.value.trim();
+    
+    // Basic validation to ensure they didn't leave it blank
+    if (!name || !url) {
+        alert('Please enter both a name and an RSS URL.');
+        return;
+    }
+    
+    // Generate a unique ID using the current timestamp so it never conflicts with your hardcoded IDs
+    const id = 'custom_' + Date.now(); 
+    const newFeed = { id: id, name: name, url: url, isCustom: true };
+    
+    // 1. Save to localStorage permanently
+    const savedFeeds = JSON.parse(localStorage.getItem('readTheNews_customFeeds')) || [];
+    savedFeeds.push(newFeed);
+    localStorage.setItem('readTheNews_customFeeds', JSON.stringify(savedFeeds));
+    
+    // 2. Add to active session immediately
+    FULL_LIBRARY.push(newFeed);
+    SHOW_LOOKUP[id] = newFeed;
+    
+    // 3. Clear the input boxes
+    nameInput.value = '';
+    urlInput.value = '';
+    
+    alert(`"${name}" has been saved to your feeds! Refresh the page to see it in your source list.`);
+}
 
         audioPlayer.addEventListener('error', (e) => {
             console.warn("Track failed to load, skipping...", e);
