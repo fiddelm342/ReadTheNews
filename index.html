@@ -317,6 +317,7 @@
             refreshPlaylistQueue();
         }
 
+
 async function fetchFeedItem(showId) {
             const show = SHOW_LOOKUP[showId];
             if (!show) return null;
@@ -341,13 +342,13 @@ async function fetchFeedItem(showId) {
                     throw new Error("API returned an error or empty feed");
                 }
             } catch (e) {
-                console.log(`API failed for ${show.name}, falling back to native XML parsing...`);
+                console.log(`API failed for ${show.name}, trying raw XML via AllOrigins proxy...`);
                 
-                // FALLBACK: Fetch the raw XML directly and parse it in the browser
+                // FALLBACK: Fetch raw XML via AllOrigins (more reliable than corsproxy)
                 try {
-                    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(show.url)}`;
+                    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(show.url)}`;
                     const xmlResponse = await fetch(proxyUrl);
-                    if (!xmlResponse.ok) throw new Error("Proxy fetch failed");
+                    if (!xmlResponse.ok) throw new Error("AllOrigins proxy fetch failed");
                     
                     const text = await xmlResponse.text();
                     const parser = new DOMParser();
@@ -356,10 +357,18 @@ async function fetchFeedItem(showId) {
                     const item = xmlDoc.querySelector("item");
                     if (item) {
                         const title = item.querySelector("title")?.textContent || show.name;
-                        const enclosure = item.querySelector("enclosure");
-                        const audioUrl = enclosure ? enclosure.getAttribute("url") : null;
+                        
+                        // Look for the standard enclosure tag first
+                        let enclosure = item.querySelector("enclosure");
+                        let audioUrl = enclosure ? enclosure.getAttribute("url") : null;
+                        
+                        // Fallback check for media:content if enclosure is missing
+                        if (!audioUrl) {
+                            const mediaContent = item.querySelector("content, [nodeName='media:content']");
+                            if (mediaContent) audioUrl = mediaContent.getAttribute("url");
+                        }
+
                         const pubDateStr = item.querySelector("pubDate")?.textContent || "";
-                        // Standard XML pubDates usually include timezone offsets, so we let the Date object handle it natively
                         const formattedDate = pubDateStr ? new Date(pubDateStr).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
 
                         if (audioUrl) {
@@ -372,6 +381,7 @@ async function fetchFeedItem(showId) {
             }
             return { id: showId, sourceName: show.name, episodeTitle: "Feed unavailable", audioUrl: null, time: "" };
         }
+        
         async function refreshPlaylistQueue(options = { fetchNewData: true }) {
             if (activeQueueOrder.length === 0) {
                 queueContainer.innerHTML = '<p class="text-slate-400 text-xs italic text-center py-4">Your queue is empty.</p>';
