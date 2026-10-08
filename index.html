@@ -278,15 +278,36 @@
 
                 sortedShows.forEach(show => {
                     const checked = activeQueueOrder.includes(show.id);
+                    
+                    // Create a wrapper for the row
+                    const rowContainer = document.createElement('div');
+                    rowContainer.className = "flex items-center justify-between p-1.5 hover:bg-slate-50 rounded-lg";
+                    
+                    // Create the standard checkbox label
                     const label = document.createElement('label');
-                    label.className = "flex items-center space-x-3 p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer text-xs select-none";
+                    label.className = "flex items-center space-x-3 cursor-pointer text-xs select-none flex-1";
                     label.innerHTML = `
                         <input type="checkbox" data-id="${show.id}" ${checked ? 'checked' : ''} 
                                class="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500">
                         <span class="text-slate-700 font-medium">${show.name}</span>
                     `;
                     label.querySelector('input').addEventListener('change', toggleShowSelection);
-                    listGrid.appendChild(label);
+                    rowContainer.appendChild(label);
+
+                    // If it is a custom feed, append a trash can button to the right side
+                    if (show.isCustom) {
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.className = "text-slate-400 hover:text-red-500 p-1 ml-2 transition focus:outline-none";
+                        deleteBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`;
+                        
+                        deleteBtn.onclick = (e) => {
+                            e.stopPropagation(); // Prevents the click from accidentally toggling the checkbox
+                            deleteCustomFeed(show.id);
+                        };
+                        rowContainer.appendChild(deleteBtn);
+                    }
+
+                    listGrid.appendChild(rowContainer);
                 });
 
                 details.appendChild(summary);
@@ -582,6 +603,22 @@ async function fetchFeedItem(showId) {
             urlInput.value = '';
             
             alert(`"${name}" has been saved and added directly to your queue!`);
+            window.location.reload();
+        }
+
+        function deleteCustomFeed(id) {
+            if (!confirm("Are you sure you want to remove this personal feed?")) return;
+            
+            // 1. Remove from the saved custom feeds in localStorage
+            let savedFeeds = JSON.parse(localStorage.getItem('readTheNews_customFeeds')) || [];
+            savedFeeds = savedFeeds.filter(feed => feed.id !== id);
+            localStorage.setItem('readTheNews_customFeeds', JSON.stringify(savedFeeds));
+            
+            // 2. Remove from the active playlist queue if it is currently selected
+            activeQueueOrder = activeQueueOrder.filter(queueId => queueId !== id);
+            localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
+            
+            // 3. Reload the app to cleanly rebuild the library and queue
             window.location.reload();
         }
 
