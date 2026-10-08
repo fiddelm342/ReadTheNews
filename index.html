@@ -538,38 +538,52 @@ async function fetchFeedItem(showId) {
             btnNext.style.opacity = btnNext.disabled ? "0.3" : "1";
         }
 
+    // 1. Pull saved custom feeds from local storage
+        const customFeeds = JSON.parse(localStorage.getItem('readTheNews_customFeeds')) || [];
+
+        // 2. Inject them into the active session as a BRAND NEW CATEGORY
+        if (customFeeds.length > 0) {
+            FULL_LIBRARY.push({
+                category: "My Personal Feeds",
+                shows: customFeeds
+            });
+            
+            customFeeds.forEach(feed => {
+                SHOW_LOOKUP[feed.id] = feed;
+            });
+        }
+
+        // 3. The save function triggered by the new button
         function saveCustomFeed() {
-    const nameInput = document.getElementById('custom-feed-name');
-    const urlInput = document.getElementById('custom-feed-url');
-    
-    const name = nameInput.value.trim();
-    const url = urlInput.value.trim();
-    
-    // Basic validation to ensure they didn't leave it blank
-    if (!name || !url) {
-        alert('Please enter both a name and an RSS URL.');
-        return;
-    }
-    
-    // Generate a unique ID using the current timestamp so it never conflicts with your hardcoded IDs
-    const id = 'custom_' + Date.now(); 
-    const newFeed = { id: id, name: name, url: url, isCustom: true };
-    
-    // 1. Save to localStorage permanently
-    const savedFeeds = JSON.parse(localStorage.getItem('readTheNews_customFeeds')) || [];
-    savedFeeds.push(newFeed);
-    localStorage.setItem('readTheNews_customFeeds', JSON.stringify(savedFeeds));
-    
-    // 2. Add to active session immediately
-    FULL_LIBRARY.push(newFeed);
-    SHOW_LOOKUP[id] = newFeed;
-    
-    // 3. Clear the input boxes
-    nameInput.value = '';
-    urlInput.value = '';
-    
-    alert(`"${name}" has been saved to your feeds! Refresh the page to see it in your source list.`);
-}
+            const nameInput = document.getElementById('custom-feed-name');
+            const urlInput = document.getElementById('custom-feed-url');
+            
+            const name = nameInput.value.trim();
+            const url = urlInput.value.trim();
+            
+            if (!name || !url) {
+                alert('Please enter both a name and an RSS URL.');
+                return;
+            }
+            
+            const id = 'custom_' + Date.now(); 
+            const newFeed = { id: id, name: name, url: url, isCustom: true };
+            
+            // Save the feed to localStorage
+            const savedFeeds = JSON.parse(localStorage.getItem('readTheNews_customFeeds')) || [];
+            savedFeeds.push(newFeed);
+            localStorage.setItem('readTheNews_customFeeds', JSON.stringify(savedFeeds));
+            
+            // Automatically add the new feed to the active queue
+            activeQueueOrder.push(id);
+            localStorage.setItem('newsQueueOrder', JSON.stringify(activeQueueOrder));
+            
+            nameInput.value = '';
+            urlInput.value = '';
+            
+            alert(`"${name}" has been saved and added directly to your queue!`);
+            window.location.reload();
+        }
 
         audioPlayer.addEventListener('error', (e) => {
             console.warn("Track failed to load, skipping...", e);
