@@ -342,13 +342,13 @@ async function fetchFeedItem(showId) {
                     throw new Error("API returned an error or empty feed");
                 }
             } catch (e) {
-                console.log(`API failed for ${show.name}, trying raw XML via AllOrigins proxy...`);
+                console.log(`API failed for ${show.name}, trying raw XML via CodeTabs proxy...`);
                 
-                // FALLBACK: Fetch raw XML via AllOrigins (more reliable than corsproxy)
+                // FALLBACK: Use the stealthier CodeTabs proxy to bypass Cloudflare
                 try {
-                    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(show.url)}`;
+                    const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(show.url)}`;
                     const xmlResponse = await fetch(proxyUrl);
-                    if (!xmlResponse.ok) throw new Error("AllOrigins proxy fetch failed");
+                    if (!xmlResponse.ok) throw new Error("CodeTabs proxy fetch failed");
                     
                     const text = await xmlResponse.text();
                     const parser = new DOMParser();
