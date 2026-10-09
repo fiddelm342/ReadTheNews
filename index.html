@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/png" href="icon-192.png">
-    <title>My News Briefing</title>
+    <title>NewsBlilp</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     <meta name="theme-color" content="#1e3a8a">
@@ -17,7 +17,7 @@
     <header class="bg-blue-900 text-white p-4 shadow-md sticky top-0 z-50 flex justify-between items-center border-b-[6px] border-[#ff9443]">
         <h1 class="text-lg font-bold tracking-tight flex items-center space-x-2">
             <span class="w-2 h-2 rounded-full bg-[#ff9443] animate-pulse shadow-[0_0_8px_#ff9443]"></span>
-            <span>Audio News Briefing</span>
+            <span>NewsBlip</span>
         </h1>
         <label class="flex items-center space-x-2 text-xs bg-blue-800 hover:bg-blue-700 px-3 py-1.5 rounded-lg border border-[#ff9443]/75 cursor-pointer select-none transition">
             <input type="checkbox" id="autoplay-toggle" class="w-4 h-4 text-[#ff9443] rounded border-slate-300 focus:ring-[#ff9443] focus:ring-offset-blue-900">
@@ -507,7 +507,7 @@ async function fetchFeedItem(showId) {
                 navigator.mediaSession.metadata = new MediaMetadata({
                     title: track.episodeTitle,
                     artist: track.sourceName,
-                    album: 'My News Briefing'
+                    album: 'NewsBlilp'
                 });
                 navigator.mediaSession.playbackState = 'playing';
             }
