@@ -1,6 +1,6 @@
 {
-  "name": "My News Briefing",
-  "short_name": "News Brief",
+  "name": "News Blip",
+  "short_name": "NewsBlilp",
   "start_url": "/ReadTheNews/index.html",
   "display": "standalone",
   "background_color": "#f8fafc",
